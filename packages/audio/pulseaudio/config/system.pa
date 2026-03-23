@@ -43,6 +43,11 @@ load-module module-suspend-on-idle
  load-module module-dbus-protocol
 .endif
 
+.ifexists module-equalizer-sink.so
+ load-module module-equalizer-sink
+ set-default-sink equalizer_sink
+.endif
+
 ### Automatically load modules for bluetooth
 .ifexists module-bluetooth-policy.so
  load-module module-bluetooth-policy
