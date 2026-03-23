@@ -343,9 +343,7 @@ post_makeinstall_target() {
 
   if [ "${KODI_PIPEWIRE_SUPPORT}" = "yes" ]; then
     KODI_AUDIO_ARGS="--audio-backend=pipewire"
-  elif [ "${KODI_PULSEAUDIO_SUPPORT}" = "yes" -a "${KODI_ALSA_SUPPORT}" = "yes" ]; then
-    KODI_AUDIO_ARGS="--audio-backend=alsa+pulseaudio"
-  elif [ "${KODI_PULSEAUDIO_SUPPORT}" = "yes" -a "${KODI_ALSA_SUPPORT}" != "yes" ]; then
+  elif [ "${KODI_PULSEAUDIO_SUPPORT}" = "yes" ]; then
     KODI_AUDIO_ARGS="--audio-backend=pulseaudio"
   elif [ "${KODI_PULSEAUDIO_SUPPORT}" != "yes" -a "${KODI_ALSA_SUPPORT}" = "yes" ]; then
     KODI_AUDIO_ARGS="--audio-backend=alsa"
