@@ -11,5 +11,8 @@ PKG_DEPENDS_TARGET="toolchain"
 PKG_LONGDESC="Extremely fast non-cryptographic hash algorithm"
 
 PKG_TOOLCHAIN="cmake"
-PKG_CMAKE_SCRIPT="cmake_unofficial/CMakeLists.txt"
 PKG_CMAKE_OPTS_TARGET="-DXXHASH_BUILD_XXHSUM=OFF"
+
+pre_configure_target() {
+  PKG_CMAKE_SCRIPT="${PKG_BUILD}/cmake_unofficial/CMakeLists.txt"
+}
