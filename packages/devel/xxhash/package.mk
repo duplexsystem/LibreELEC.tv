@@ -9,3 +9,6 @@ PKG_SITE="https://xxhash.com"
 PKG_URL="https://github.com/Cyan4973/xxHash/archive/refs/tags/v${PKG_VERSION}.tar.gz"
 PKG_DEPENDS_TARGET="toolchain"
 PKG_LONGDESC="Extremely fast non-cryptographic hash algorithm"
+
+PKG_CMAKE_SCRIPT="cmake_unofficial/CMakeLists.txt"
+PKG_CMAKE_OPTS_TARGET="-DXXHASH_BUILD_XXHSUM=OFF"
