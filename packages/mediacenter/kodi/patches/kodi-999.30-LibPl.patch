@@ -1,0 +1,3488 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0752e7a..b34f506 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -127,6 +127,7 @@ dependent_option(ENABLE_INTERNAL_EXIV2 "Enable internal exiv2?")
+ dependent_option(ENABLE_INTERNAL_FLATBUFFERS "Enable internal flatbuffers?")
+ dependent_option(ENABLE_INTERNAL_FMT "Enable internal fmt?")
+ dependent_option(ENABLE_INTERNAL_LIBMICROHTTPD  "Enable internal libmicrohttpd?")
++dependent_option(ENABLE_INTERNAL_LIBPLACEBO "Enable internal libplacebo?")
+ dependent_option(ENABLE_INTERNAL_LZO2 "Enable internal lzo2?")
+ dependent_option(ENABLE_INTERNAL_NFS "Enable internal libnfs?")
+ dependent_option(ENABLE_INTERNAL_PCRE2 "Enable internal pcre2?")
+@@ -272,6 +273,7 @@ set(optional_deps Alsa>=1.0.27
+                   DBus
+                   Iso9660pp>=2.1.0
+                   LCMS2>=2.10
++                  Libplacebo
+                   LircClient
+                   MDNS
+                   MicroHttpd>=0.9.40
+diff --git a/addons/resource.language.en_gb/resources/strings.po b/addons/resource.language.en_gb/resources/strings.po
+index a7f9fa7..98e5ae0 100644
+--- a/addons/resource.language.en_gb/resources/strings.po
++++ b/addons/resource.language.en_gb/resources/strings.po
+@@ -7759,7 +7759,73 @@ msgctxt "#13476"
+ msgid "16 bit per channel"
+ msgstr ""
+ 
+-#empty strings from id 13477 to 13504
++#. Label for libplacebo render preset selector in Settings > Player > Videos > Processing
++#: system/settings/linux.xml
++msgctxt "#13483"
++msgid "Render Quality Preset"
++msgstr ""
++
++#. Help text for libplacebo render preset selector
++#: system/settings/linux.xml
++msgctxt "#13484"
++msgid "Sets the overall libplacebo render quality. Fast uses minimal processing; Default balances quality and performance; High Quality enables the best upscaling and tone mapping at higher GPU cost."
++msgstr ""
++
++#. Value of setting with label #13483 "Render Quality Preset"
++#: system/settings/linux.xml
++msgctxt "#13485"
++msgid "Fast"
++msgstr ""
++
++#. Value of setting with label #13483 "Render Quality Preset"
++#: system/settings/linux.xml
++msgctxt "#13486"
++msgid "Default"
++msgstr ""
++
++#. Value of setting with label #13483 "Render Quality Preset"
++#: system/settings/linux.xml
++msgctxt "#13487"
++msgid "High Quality"
++msgstr ""
++
++#. Label for libplacebo debanding toggle in Settings > Player > Videos > Processing
++#: system/settings/linux.xml
++msgctxt "#13477"
++msgid "Debanding"
++msgstr ""
++
++#. Help text for libplacebo debanding toggle
++#: system/settings/linux.xml
++msgctxt "#13478"
++msgid "Remove colour banding artifacts from smooth gradients. Recommended for most content."
++msgstr ""
++
++#. Label for libplacebo HDR peak detection toggle in Settings > Player > Videos > Processing
++#: system/settings/linux.xml
++msgctxt "#13479"
++msgid "HDR Peak Detection"
++msgstr ""
++
++#. Help text for libplacebo HDR peak detection toggle
++#: system/settings/linux.xml
++msgctxt "#13480"
++msgid "Dynamically measure peak brightness from HDR content for more accurate tone mapping."
++msgstr ""
++
++#. Label for libplacebo frame interpolation toggle in Settings > Player > Videos > Processing
++#: system/settings/linux.xml
++msgctxt "#13481"
++msgid "Frame Interpolation"
++msgstr ""
++
++#. Help text for libplacebo frame interpolation toggle
++#: system/settings/linux.xml
++msgctxt "#13482"
++msgid "Interpolate frames to smooth motion at the display refresh rate. May increase latency."
++msgstr ""
++
++#empty strings from id 13483 to 13504
+ 
+ #: system/settings/settings.xml
+ msgctxt "#13505"
+@@ -9609,7 +9675,12 @@ msgctxt "#16330"
+ msgid "Bicubic (0,1.)"
+ msgstr ""
+ 
+-#empty strings from id 16331 to 16333
++#: xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.cpp
++msgctxt "#16331"
++msgid "LibPlacebo"
++msgstr ""
++
++#empty strings from id 16332 to 16333
+ 
+ #. Description of OSD video settings for deinterlace method with label #16334
+ #: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
+@@ -9629,7 +9700,25 @@ msgctxt "#16336"
+ msgid "IMX - Advanced"
+ msgstr ""
+ 
+-#empty strings from id 16337 to 16399
++#. Description of OSD video settings for deinterlace method with label #16337
++#: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
++msgctxt "#16337"
++msgid "libplacebo - Bob"
++msgstr ""
++
++#. Description of OSD video settings for deinterlace method with label #16338
++#: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
++msgctxt "#16338"
++msgid "libplacebo - YADIF"
++msgstr ""
++
++#. Description of OSD video settings for deinterlace method with label #16339
++#: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
++msgctxt "#16339"
++msgid "libplacebo - BWDIF"
++msgstr ""
++
++#empty strings from id 16340 to 16399
+ 
+ #: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
+ msgctxt "#16400"
+diff --git a/cmake/modules/FindLibplacebo.cmake b/cmake/modules/FindLibplacebo.cmake
+new file mode 100644
+index 0000000..9ecb489
+--- /dev/null
++++ b/cmake/modules/FindLibplacebo.cmake
+@@ -0,0 +1,120 @@
++#.rst:
++# FindLibplacebo
++# --------
++# Finds the libplacebo library
++#
++# This will define the following target:
++#
++#   ${APP_NAME_LC}::Libplacebo   - The libplacebo library
++
++if(NOT TARGET ${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME})
++
++  include(cmake/scripts/common/ModuleHelpers.cmake)
++
++  macro(buildmacroLibplacebo)
++
++    find_package(Meson REQUIRED)
++    find_package(Ninja REQUIRED)
++
++    if(WIN32 OR WINDOWS_STORE)
++      set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_SHARED_LIB 1)
++
++      if(WINDOWS_STORE)
++        set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_EXE_LINKER_FLAGS "/APPCONTAINER windowsapp.lib")
++      endif()
++
++      create_module_dev_env()
++    endif()
++
++    # generate meson cross file for build target
++    generate_mesoncrossfile()
++
++    if(EXISTS ${DEPENDS_PATH}/share/${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}-cross-file.meson)
++      set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}_CROSS_FILE --cross-file=${DEPENDS_PATH}/share/${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}-cross-file.meson)
++    elseif(EXISTS ${DEPENDS_PATH}/share/cross-file.meson)
++      set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}_CROSS_FILE --cross-file=${DEPENDS_PATH}/share/cross-file.meson)
++    endif()
++
++    set(CONFIGURE_COMMAND ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_dev_env}
++                          ${CMAKE_COMMAND} -E env --modify NINJA=set:${NINJA_EXECUTABLE}
++                          ${MESON_EXECUTABLE} setup ./build
++                          --buildtype=release
++                          --default-library=static
++                          --prefix=${DEPENDS_PATH}
++                          --libdir=lib
++                          -Dtests=false
++                          -Ddemos=false
++                          -Dvulkan=enabled
++                          -Dopengl=enabled
++                          -Dd3d11=disabled
++                          ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}_CROSS_FILE})
++
++    if(WIN32 OR WINDOWS_STORE)
++      set(CONFIGURE_COMMAND ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_dev_env}
++                            ${CMAKE_COMMAND} -E env --modify NINJA=set:${NINJA_EXECUTABLE}
++                            ${MESON_EXECUTABLE} setup ./build
++                            --buildtype=release
++                            --default-library=shared
++                            --prefix=${DEPENDS_PATH}
++                            --libdir=lib
++                            -Dtests=false
++                            -Ddemos=false
++                            -Dvulkan=disabled
++                            -Dopengl=disabled
++                            -Dd3d11=enabled
++                            ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}_CROSS_FILE})
++    endif()
++
++    set(BUILD_COMMAND ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_dev_env}
++                      ${NINJA_EXECUTABLE} -C ./build)
++    set(INSTALL_COMMAND ${NINJA_EXECUTABLE} -C ./build install)
++    set(BUILD_IN_SOURCE 1)
++
++    BUILD_DEP_TARGET()
++
++  endmacro()
++
++  set(${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC libplacebo)
++
++  SETUP_BUILD_VARS()
++
++  SETUP_FIND_SPECS()
++
++  SEARCH_EXISTING_PACKAGES()
++
++  if((${${CMAKE_FIND_PACKAGE_NAME}_SEARCH_NAME}_VERSION VERSION_LESS ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_VER} AND ENABLE_INTERNAL_LIBPLACEBO) OR
++     (((CORE_SYSTEM_NAME STREQUAL linux AND NOT "webos" IN_LIST CORE_PLATFORM_NAME_LC) OR CORE_SYSTEM_NAME STREQUAL freebsd) AND ENABLE_INTERNAL_LIBPLACEBO))
++    message(STATUS "Building ${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}: \(version \"${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_VER}\"\)")
++
++    cmake_language(EVAL CODE "
++      buildmacro${CMAKE_FIND_PACKAGE_NAME}()
++    ")
++
++    if(TARGET libplacebo::libplacebo)
++      if(EXISTS "${DEPENDS_PATH}/lib/cmake/libplacebo")
++        file(REMOVE_RECURSE "${DEPENDS_PATH}/lib/cmake/libplacebo")
++      endif()
++    endif()
++  endif()
++
++  if(${${CMAKE_FIND_PACKAGE_NAME}_SEARCH_NAME}_FOUND)
++    if(TARGET libplacebo::libplacebo AND NOT TARGET ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_BUILD_NAME})
++      add_library(${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME} ALIAS libplacebo::libplacebo)
++    elseif(TARGET PkgConfig::${${CMAKE_FIND_PACKAGE_NAME}_SEARCH_NAME} AND NOT TARGET ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_BUILD_NAME})
++      add_library(${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME} ALIAS PkgConfig::${${CMAKE_FIND_PACKAGE_NAME}_SEARCH_NAME})
++    else()
++      SETUP_BUILD_TARGET()
++
++      add_dependencies(${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME} ${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_BUILD_NAME})
++
++      set_target_properties(${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME} PROPERTIES LIB_BUILD ON)
++    endif()
++
++    # Signal that libplacebo is available on this platform (non-Windows uses OpenGL backend)
++    if(NOT (WIN32 OR WINDOWS_STORE))
++      add_compile_definitions(HAS_LIBPLACEBO)
++    endif()
++
++    ADD_MULTICONFIG_BUILDMACRO()
++  endif()
++endif()
+diff --git a/cmake/treedata/common/videoplayer.txt b/cmake/treedata/common/videoplayer.txt
+index ed804c8..5dab2f9 100644
+--- a/cmake/treedata/common/videoplayer.txt
++++ b/cmake/treedata/common/videoplayer.txt
+@@ -11,4 +11,5 @@ xbmc/cores/VideoPlayer/DVDSubtitles/webvtt         cores/VideoPlayer/subtitles/w
+ xbmc/cores/VideoPlayer/Process                     cores/VideoPlayer/process
+ xbmc/cores/VideoPlayer/VideoRenderers              cores/VideoPlayer/videorenderers
+ xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender  cores/VideoPlayer/videorenderers/hwdec
++xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo   cores/VideoPlayer/videorenderers/LibPlacebo
+ xbmc/cores/VideoPlayer/VideoRenderers/VideoShaders cores/VideoPlayer/videorenderers/shaders
+diff --git a/system/settings/linux.xml b/system/settings/linux.xml
+index 6c2db26..33aa1cd 100644
+--- a/system/settings/linux.xml
++++ b/system/settings/linux.xml
+@@ -58,6 +58,40 @@
+           </dependencies>
+           <control type="toggle" />
+         </setting>
++        <setting id="videoplayer.libplacebo.preset" type="integer" label="13483" help="13484">
++          <requirement>HAS_LIBPLACEBO</requirement>
++          <level>2</level>
++          <default>1</default>
++          <constraints>
++            <options>
++              <option label="13485">0</option> <!-- fast -->
++              <option label="13486">1</option> <!-- default -->
++              <option label="13487">2</option> <!-- high_quality -->
++            </options>
++          </constraints>
++          <control type="spinner" format="string" />
++        </setting>
++        <setting id="videoplayer.libplacebo.deband" type="boolean" label="13477" help="13478">
++          <requirement>HAS_LIBPLACEBO</requirement>
++          <visible>false</visible>
++          <level>2</level>
++          <default>true</default>
++          <control type="toggle" />
++        </setting>
++        <setting id="videoplayer.libplacebo.peakdetect" type="boolean" label="13479" help="13480">
++          <requirement>HAS_LIBPLACEBO</requirement>
++          <visible>false</visible>
++          <level>2</level>
++          <default>true</default>
++          <control type="toggle" />
++        </setting>
++        <setting id="videoplayer.libplacebo.framemix" type="boolean" label="13481" help="13482">
++          <requirement>HAS_LIBPLACEBO</requirement>
++          <visible>false</visible>
++          <level>2</level>
++          <default>false</default>
++          <control type="toggle" />
++        </setting>
+         <setting id="videoplayer.usevaapi" type="boolean" label="13426" help="36156">
+           <requirement>HAVE_LIBVA</requirement>
+           <visible>false</visible>
+diff --git a/tools/depends/target/libplacebo/LIBPLACEBO-VERSION b/tools/depends/target/libplacebo/LIBPLACEBO-VERSION
+new file mode 100644
+index 0000000..3cc8856
+--- /dev/null
++++ b/tools/depends/target/libplacebo/LIBPLACEBO-VERSION
+@@ -0,0 +1,4 @@
++LIBNAME=libplacebo
++VERSION=7.349.0
++ARCHIVE=$(LIBNAME)-$(VERSION).tar.bz2
++BYPRODUCT=libplacebo.a
+diff --git a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h
+index d58b3fc..c3f7fae 100644
+--- a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h
++++ b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h
+@@ -15,12 +15,21 @@
+ 
+ extern "C" {
+ #include <libavcodec/avcodec.h>
++#include <libavutil/dovi_meta.h>
++#include <libavutil/hdr_dynamic_metadata.h>
+ #include <libavutil/mastering_display_metadata.h>
+ }
+ 
+ #include <vector>
+ #include <string>
+ #include <map>
++#if defined(HAS_LIBPLACEBO)
++#define PL_LIBAV_IMPLEMENTATION 0
++#include "libplacebo/colorspace.h"
++
++#include <libplacebo/utils/dolbyvision.h>
++#include <libplacebo/utils/libav.h>
++#endif
+ 
+ class CSetting;
+ 
+@@ -74,6 +83,12 @@ public:
+   bool hasLightMetadata = false;
+   AVContentLightMetadata lightMetadata;
+ 
++#if defined(HAS_LIBPLACEBO)
++  pl_color_space plColorSpace;
++  pl_color_repr plColorRepr;
++  pl_dovi_metadata plDoviMetadata;
++#endif
++
+   AVPixelFormat pixelFormat; //< source pixel format
+ 
+   unsigned int iWidth;
+diff --git a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecFFmpeg.cpp b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecFFmpeg.cpp
+index 75ffb61..6b5826d 100644
+--- a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecFFmpeg.cpp
++++ b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecFFmpeg.cpp
+@@ -35,6 +35,7 @@ extern "C" {
+ #include <libavfilter/avfilter.h>
+ #include <libavfilter/buffersink.h>
+ #include <libavfilter/buffersrc.h>
++#include <libavutil/hdr_dynamic_metadata.h>
+ #include <libavutil/mastering_display_metadata.h>
+ #include <libavutil/opt.h>
+ #include <libavutil/pixdesc.h>
+@@ -1105,10 +1106,13 @@ bool CDVDVideoCodecFFmpeg::GetPictureCommon(VideoPicture* pVideoPicture)
+   // metadata
+   pVideoPicture->hasDisplayMetadata = false;
+   pVideoPicture->hasLightMetadata = false;
+-  sd = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+-  if (sd)
++
++  AVFrameSideData* mdm = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
++  AVFrameSideData* clm = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
++  AVFrameSideData* dhp = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
++  if (mdm)
+   {
+-    pVideoPicture->displayMetadata = *(AVMasteringDisplayMetadata *)sd->data;
++    pVideoPicture->displayMetadata = *(AVMasteringDisplayMetadata*)mdm->data;
+     pVideoPicture->hasDisplayMetadata = true;
+   }
+   else if (m_hints.masteringMetadata)
+@@ -1116,10 +1120,10 @@ bool CDVDVideoCodecFFmpeg::GetPictureCommon(VideoPicture* pVideoPicture)
+     pVideoPicture->displayMetadata = *m_hints.masteringMetadata.get();
+     pVideoPicture->hasDisplayMetadata = true;
+   }
+-  sd = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+-  if (sd)
++  clm = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
++  if (clm)
+   {
+-    pVideoPicture->lightMetadata = *(AVContentLightMetadata *)sd->data;
++    pVideoPicture->lightMetadata = *(AVContentLightMetadata*)clm->data;
+     pVideoPicture->hasLightMetadata = true;
+   }
+   else if (m_hints.contentLightMetadata)
+@@ -1128,17 +1132,29 @@ bool CDVDVideoCodecFFmpeg::GetPictureCommon(VideoPicture* pVideoPicture)
+     pVideoPicture->hasLightMetadata = true;
+   }
+ 
++#if defined(HAS_LIBPLACEBO)
++  // set to 0 hdr data in case we don't have it
++  memset(&pVideoPicture->plColorSpace, 0, sizeof(pl_color_space));
++  memset(&pVideoPicture->plColorRepr, 0, sizeof(pl_color_repr));
++  struct pl_av_hdr_metadata plavhdr = {.mdm = (AVMasteringDisplayMetadata*)(mdm ? mdm->data : NULL),
++                                       .clm = (AVContentLightMetadata*)(clm ? clm->data : NULL),
++                                       .dhp = (AVDynamicHDRPlus*)(dhp ? dhp->data : NULL)};
++
++  pl_map_hdr_metadata(&pVideoPicture->plColorSpace.hdr, &plavhdr);
++#endif // HAS_LIBPLACEBO
++
++  /* DOVI metadata extraction */
+   if (pVideoPicture->hdrType == StreamHdrType::HDR_TYPE_DOLBYVISION)
+   {
+     sd = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DOVI_METADATA);
+     if (sd)
+     {
+-      AVDOVIMetadata* dovi = (AVDOVIMetadata*)sd->data;
+-      const AVDOVIRpuDataHeader* hdr = av_dovi_get_header(dovi);
+-      const AVDOVIDataMapping* mapping = av_dovi_get_mapping(dovi);
++      const AVDOVIMetadata* metadata = (const AVDOVIMetadata*)sd->buf->data;
++      const AVDOVIRpuDataHeader* header = av_dovi_get_header(metadata);
++      const AVDOVIDataMapping* mapping = av_dovi_get_mapping(metadata);
+ 
+-      if (hdr != nullptr && hdr->el_spatial_resampling_filter_flag == 1 &&
+-          hdr->disable_residual_flag == 0)
++      if (header != nullptr && header->el_spatial_resampling_filter_flag == 1 &&
++          header->disable_residual_flag == 0)
+       {
+         pVideoPicture->strDVELType = "MEL";
+         for (int i = 0; i < 3; i++)
+@@ -1153,9 +1169,20 @@ bool CDVDVideoCodecFFmpeg::GetPictureCommon(VideoPicture* pVideoPicture)
+           }
+         }
+       }
++
++#if defined(HAS_LIBPLACEBO)
++      if (header->disable_residual_flag)
++      {
++
++        pl_map_avdovi_metadata(&pVideoPicture->plColorSpace, &pVideoPicture->plColorRepr,
++                               &pVideoPicture->plDoviMetadata, metadata);
++
++      }
++#endif // HAS_LIBPLACEBO
+     }
+   }
+ 
++  /* HDR10+ parsing */
+   if (pVideoPicture->hdrType == StreamHdrType::HDR_TYPE_HDR10 ||
+       pVideoPicture->hdrType == StreamHdrType::HDR_TYPE_DOLBYVISION)
+   {
+@@ -1169,6 +1196,14 @@ bool CDVDVideoCodecFFmpeg::GetPictureCommon(VideoPicture* pVideoPicture)
+     }
+   }
+ 
++#if defined(HAS_LIBPLACEBO)
++  /* dovi rpu for libplacebo */
++  sd = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DOVI_RPU_BUFFER);
++  if (sd)
++  {
++    pl_hdr_metadata_from_dovi_rpu(&pVideoPicture->plColorSpace.hdr, sd->buf->data, sd->buf->size);
++  }
++#endif // HAS_LIBPLACEBO
+   if (pVideoPicture->iRepeatPicture)
+     pVideoPicture->dts = DVD_NOPTS_VALUE;
+   else
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.cpp
+index 6a2227f..982ea3d 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.cpp
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.cpp
+@@ -522,6 +522,12 @@ void CBaseRenderer::SettingOptionsRenderMethodsFiller(
+   list.emplace_back(CServiceBroker::GetResourcesComponent().GetLocalizeStrings().Get(13416),
+                     RENDER_METHOD_AUTO);
+ 
++#if defined(HAS_LIBPLACEBO)
++  list.push_back(
++      IntegerSettingOption(CServiceBroker::GetResourcesComponent().GetLocalizeStrings().Get(16331),
++                           RENDER_METHOD_LIBPLACEBO));
++#endif
++
+ #ifdef HAS_DX
+   list.push_back(IntegerSettingOption(
+       CServiceBroker::GetResourcesComponent().GetLocalizeStrings().Get(16319), RENDER_METHOD_DXVA));
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.h b/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.h
+index 26162aa..36ffc72 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.h
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/BaseRenderer.h
+@@ -35,12 +35,13 @@ enum EFIELDSYNC
+ // Render Methods
+ enum RenderMethods
+ {
+-  RENDER_METHOD_AUTO     = 0,
++  RENDER_METHOD_AUTO = 0,
+   RENDER_METHOD_GLSL,
+   RENDER_METHOD_SOFTWARE,
+   RENDER_METHOD_D3D_PS,
+   RENDER_METHOD_DXVA,
+-  RENDER_OVERLAYS        = 99   // to retain compatibility
++  RENDER_METHOD_LIBPLACEBO,
++  RENDER_OVERLAYS = 99 // to retain compatibility
+ };
+ 
+ struct VideoPicture;
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/CMakeLists.txt b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/CMakeLists.txt
+index 4951012..a5a54b8 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/CMakeLists.txt
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/CMakeLists.txt
+@@ -56,11 +56,15 @@ if("gbm" IN_LIST CORE_PLATFORM_NAME_LC OR "wayland" IN_LIST CORE_PLATFORM_NAME_L
+                         VideoLayerBridgeDRMPRIME.h)
+   endif()
+ 
++  # DRMPRIMEEGL is needed by both the GLES DRMPRIME renderer and the
++  # libplacebo GL renderer (Wayland+GL can also receive DRM-PRIME buffers).
++  if(TARGET ${APP_NAME_LC}::EGL)
++    list(APPEND SOURCES DRMPRIMEEGL.cpp)
++    list(APPEND HEADERS DRMPRIMEEGL.h)
++  endif()
+   if(TARGET ${APP_NAME_LC}::OpenGLES)
+-    list(APPEND SOURCES RendererDRMPRIMEGLES.cpp
+-                        DRMPRIMEEGL.cpp)
+-    list(APPEND HEADERS RendererDRMPRIMEGLES.h
+-                        DRMPRIMEEGL.h)
++    list(APPEND SOURCES RendererDRMPRIMEGLES.cpp)
++    list(APPEND HEADERS RendererDRMPRIMEGLES.h)
+   endif()
+ endif()
+ 
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/DRMPRIMEEGL.h b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/DRMPRIMEEGL.h
+index e1e1310..81aa1ed 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/DRMPRIMEEGL.h
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/HwDecRender/DRMPRIMEEGL.h
+@@ -14,6 +14,13 @@
+ 
+ #include "system_gl.h"
+ 
++// GL_OES_EGL_image_external (0x8D65) is only in <GLES2/gl2ext.h>,
++// not in <GL/glext.h>; define it portably so this header works in
++// both desktop-GL and GLES translation units.
++#ifndef GL_TEXTURE_EXTERNAL_OES
++#define GL_TEXTURE_EXTERNAL_OES 0x8D65
++#endif
++
+ class CDRMPRIMETexture
+ {
+ public:
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/CMakeLists.txt b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/CMakeLists.txt
+new file mode 100644
+index 0000000..f9a64c0
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/CMakeLists.txt
+@@ -0,0 +1,25 @@
++if (NOT TARGET ${APP_NAME_LC}::Libplacebo)
++    return()
++endif ()
++
++set(SOURCES libav_wrapper.c
++        PLHelper.cpp)
++
++set(HEADERS
++        PLHelper.h)
++
++if (NOT (WIN32 OR WINDOWS_STORE))
++    list(APPEND HEADERS LinuxRendererPLBase.h)
++    list(APPEND SOURCES LinuxRendererPLGL.cpp)
++    list(APPEND HEADERS LinuxRendererPLGL.h)
++    if (TARGET ${APP_NAME_LC}::OpenGLES)
++        list(APPEND SOURCES LinuxRendererPLGLES.cpp)
++        list(APPEND HEADERS LinuxRendererPLGLES.h)
++    endif ()
++endif ()
++
++core_add_library(videorenderers-libplacebo)
++
++if (TARGET ${APP_NAME_LC}::VAAPI)
++    target_link_libraries(videorenderers-libplacebo PRIVATE ${APP_NAME_LC}::VAAPI)
++endif ()
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLBase.h b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLBase.h
+new file mode 100644
+index 0000000..b0ec4ac
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLBase.h
+@@ -0,0 +1,1590 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#pragma once
++
++// NOTE: This header must be included AFTER the concrete base renderer header
++// (LinuxRendererGL.h or LinuxRendererGLES.h) so that renderer-specific types
++// such as CPictureBuffer, RenderMethod, and EShaderFormat are already declared.
++
++#include "PLHelper.h"
++#include "ServiceBroker.h"
++#include "cores/VideoPlayer/Buffers/VideoBufferDRMPRIME.h"
++#include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
++#include "cores/VideoPlayer/VideoRenderers/BaseRenderer.h"
++#include "cores/VideoPlayer/VideoRenderers/HwDecRender/DRMPRIMEEGL.h"
++#include "cores/VideoPlayer/VideoRenderers/VideoShaders/ShaderFormats.h"
++#include "filesystem/File.h"
++#include "settings/Settings.h"
++#include "utils/log.h"
++#include "windowing/GraphicContext.h"
++#include "windowing/WinSystem.h"
++
++#include "system_gl.h"
++
++#if defined(HAVE_LIBVA)
++#include "cores/VideoPlayer/DVDCodecs/Video/VAAPI.h"
++#include <va/va_drmcommon.h>
++#endif // HAVE_LIBVA
++
++#include <drm_fourcc.h>
++#include <linux/dma-buf.h>
++#include <sys/ioctl.h>
++
++extern "C"
++{
++#include <libavutil/pixdesc.h>
++#include <libavutil/pixfmt.h>
++}
++
++#include <array>
++#include <cstring>
++
++#include <libplacebo/shaders/icc.h>
++#include <libplacebo/utils/libav.h>
++#include <unistd.h>
++
++#include <EGL/egl.h>
++#include <EGL/eglext.h>
++
++/**
++ * @brief CRTP mixin providing the shared libplacebo renderer implementation.
++ *
++ * TBase is either CLinuxRendererGL or CLinuxRendererGLES.
++ * Concrete classes must:
++ *   - Provide static Create()/Register() factory methods
++ *   - Implement GetVaapiTexTarget() — returns GL_TEXTURE_2D (desktop) or
++ *     GL_TEXTURE_EXTERNAL_OES (GLES)
++ *   - Implement GetDRMPRIMEEGLDisplay() — returns the platform EGLDisplay to
++ *     pass to CDRMPRIMETexture::Init()
++ */
++template<typename TBase>
++class CLinuxRendererPLBase : public TBase
++{
++public:
++  CLinuxRendererPLBase();
++  ~CLinuxRendererPLBase() override;
++
++  bool Configure(const VideoPicture& picture, float fps, unsigned int orientation) override;
++  bool ConfigChanged(const VideoPicture& picture) override;
++  [[nodiscard]] bool Supports(ERENDERFEATURE feature) const override;
++  [[nodiscard]] bool Supports(ESCALINGMETHOD method) const override;
++  CRenderInfo GetRenderInfo() override;
++  void AddVideoPicture(const VideoPicture& picture, int index) override;
++  bool Flush(bool saveBuffers) override;
++
++protected:
++  bool CreateTexture(int index) override;
++  void DeleteTexture(int index) override;
++  bool UploadTexture(int index) override;
++  bool LoadShadersHook() override;
++  bool RenderHook(int idx) override;
++  void UpdateVideoFilter() override;
++  EShaderFormat GetShaderFormat() override;
++
++  // Platform-specific hooks implemented by concrete subclasses.
++  [[nodiscard]] virtual GLenum GetVaapiTexTarget() const = 0;
++  [[nodiscard]] virtual EGLDisplay GetDRMPRIMEEGLDisplay() const = 0;
++
++private:
++  // Persistent per-slot GL resources for the software decode upload path.
++  // Kept separate from PLBuffer so they survive across per-frame ReleasePLBuffer
++  // calls (which only destroy the lightweight pl_tex wrappers). Freed in
++  // DeleteTexture and the destructor.
++  struct SWBuffer
++  {
++    GLuint pbo[4]{0, 0, 0, 0}; ///< Pixel Buffer Objects for async CPU→GPU DMA
++    GLsizeiptr pboSize[4]{0, 0, 0, 0}; ///< Allocated PBO size (bytes) for resize detection
++    GLuint tex[4]{0, 0, 0, 0}; ///< Target GL_TEXTURE_2D textures
++    int texW[4]{0, 0, 0, 0}; ///< Cached dimensions for resize detection
++    int texH[4]{0, 0, 0, 0};
++    GLenum texIformat[4]{0, 0, 0, 0}; ///< Cached iformat for format-change detection
++  };
++
++  struct PLBuffer
++  {
++    pl_plane planes[4]{};
++    pl_tex tex[4]{};
++    int num_planes{0};
++    pl_color_space colorSpace{};
++    pl_color_repr colorRepr{};
++    pl_dovi_metadata doviMetadata{}; ///< Owned copy; colorRepr.dovi points here when valid
++    unsigned int iFlags{0}; ///< DVP_FLAG_* interlace flags
++    bool loaded{false};
++    
++    // Pending EGL sync object imported from a DMA-buf sync-file fence.
++    // EGL_NO_SYNC_KHR means eglWaitSyncKHR has already been called or no sync is needed.
++    // Used by both the VAAPI and DRMPRIME paths.
++    EGLSyncKHR eglSyncFence{EGL_NO_SYNC_KHR};
++    
++#if defined(HAVE_LIBVA)
++    GLuint vaapiGLTex[3]{};
++    EGLImageKHR vaapiEGLImage[3]{EGL_NO_IMAGE_KHR, EGL_NO_IMAGE_KHR, EGL_NO_IMAGE_KHR};
++    int vaapiExportedFd[4]{-1, -1, -1, -1};
++    int vaapiNumFds{0};
++#endif
++  };
++
++  std::array<PLBuffer, NUM_BUFFERS> m_plBuffers{};
++  std::array<SWBuffer, NUM_BUFFERS> m_swBuffers{};
++  std::array<CDRMPRIMETexture, NUM_BUFFERS> m_drmTextures{};
++  bool m_isDRMPRIME{false};
++  // True when eglQueryDmaBufModifiersEXT is available: the EGL stack inserts
++  // implicit DMA-buf fences at eglCreateImageKHR time, making explicit CPU or
++  // GPU-side sync redundant for both VAAPI and DRMPRIME paths.
++  bool m_hasEGLModifiers{false};
++
++  // EGL context used globally for Sync objects and Image KHR
++  EGLDisplay m_eglDisplay{EGL_NO_DISPLAY};
++
++#if defined(HAVE_LIBVA)
++  bool m_isVAAPI{false};
++  PFNEGLCREATEIMAGEKHRPROC m_eglCreateImageKHR{nullptr};
++  PFNEGLDESTROYIMAGEKHRPROC m_eglDestroyImageKHR{nullptr};
++  PFNGLEGLIMAGETARGETTEXTURE2DOESPROC m_glEGLImageTargetTexture2DOES{nullptr};
++#endif
++
++  AVPixelFormat m_format{AV_PIX_FMT_NONE};
++  pl_color_space m_colorSpace{};
++  pl_chroma_location m_chromaLocation{PL_CHROMA_UNKNOWN};
++  std::unique_ptr<PL::RenderConfig> m_plConfig;
++
++  struct QueuedFrameState
++  {
++    int bufferIndex;
++    CLinuxRendererPLBase* renderer;
++  };
++  // libplacebo guarantees exactly one of unmap/discard is called per pushed frame.
++  // QueuedFrameState must be trivially destructible so raw delete is safe and
++  // no destructor side effects are silently skipped on the discard path.
++  static_assert(std::is_trivially_destructible_v<QueuedFrameState>);
++
++  pl_queue m_plQueue{nullptr};
++  double m_queuePtsOffset{0.0};
++  bool m_queuePtsOffsetSet{false};
++
++  // Cached GL framebuffer → pl_tex wrapper.
++  // pl_opengl_wrap/pl_tex_destroy for a framebuffer flushes GPU command queues on
++  // some drivers and forces a full libplacebo internal state reset.  Wrapping once
++  // and reusing the same pl_tex across frames avoids that overhead entirely.
++  // Invalidated when the bound FBO id, viewport width, or viewport height changes.
++  pl_tex m_cachedFboTex{nullptr};
++  unsigned int m_cachedFboId{UINT_MAX};
++  int m_cachedFboW{0};
++  int m_cachedFboH{0};
++
++  // Cached Kodi VAO handle.
++  // glGetIntegerv(GL_VERTEX_ARRAY_BINDING) serializes the GPU command stream on
++  // tile-based GPUs (Mali / Adreno / PowerVR / Apple GPU) because the driver must
++  // finish all in-flight work before reading back a GPU-side integer.  Kodi's VAO
++  // is stable for the lifetime of the renderer, so we query it once and cache it.
++  GLint m_kodiVAO{0};
++  bool m_kodiVaoCached{false};
++
++  // Cached GL save/restore state.
++  // Viewport, scissor enable, and scissor box are CPU-side shadow state in every
++  // known GL driver (not a GPU round-trip), but we still save 3 function calls per
++  // frame by caching them.  Invalidated whenever the FBO dimensions change.
++  bool m_glStateCached{false};
++  GLint m_cachedGLViewport[4]{};
++  GLboolean m_cachedScissorEnabled{GL_FALSE};
++  GLint m_cachedGLScissor[4]{};
++
++  // When the GL context was created with EGL_CONTEXT_OPENGL_NO_ERROR_KHR, all
++  // error generation is disabled and glGetError() always returns GL_NO_ERROR.
++  // In that case we can skip the pre-render error drain entirely.
++  bool m_glNoError{false};
++
++  // EGL_ANDROID_native_fence_sync: GPU-side DMA-buf fence wait.
++  //
++  // Used for both VAAPI and DRMPRIME paths.  When this extension and the
++  // DMA_BUF_IOCTL_EXPORT_SYNC_FILE ioctl (kernel ≥ 5.2) are available, we
++  // export the DMA-buf read fence as a sync-file fd, import it as an EGL
++  // sync object, and call eglWaitSyncKHR — a GPU command-stream wait that
++  // never stalls the CPU.
++  PFNEGLCREATESYNCKHRPROC m_eglCreateSyncKHR{nullptr};
++  PFNEGLDESTROYSYNCKHRPROC m_eglDestroySyncKHR{nullptr};
++  PFNEGLWAITSYNCKHRPROC m_eglWaitSyncKHR{nullptr};
++  bool m_hasEGLSyncFence{false};
++
++  bool UploadVAAPI(int index, PLBuffer& plbuf);
++  bool UploadDRMPRIME(int index, PLBuffer& plbuf);
++  bool UploadSoftware(int index, PLBuffer& plbuf);
++
++  static bool MapCallback(pl_gpu gpu,
++                          pl_tex* tex,
++                          const struct pl_source_frame* src,
++                          struct pl_frame* out);
++  static void UnmapCallback(pl_gpu gpu, struct pl_frame* frame, const struct pl_source_frame* src);
++  static void DiscardCallback(const struct pl_source_frame* src);
++
++  void ReleasePLBuffer(int index);
++  void ReleaseSWBuffer(int index);
++
++  // Map pl_plane_data component layout → GL iformat/format/type/bytesPerPixel.
++  static bool PlaneDataToGLFormats(
++      const pl_plane_data& pd, GLenum& iformat, GLenum& format, GLenum& type, int& bytesPerPixel);
++};
++
++// =============================================================================
++// Template implementations
++// =============================================================================
++
++template<typename TBase>
++CLinuxRendererPLBase<TBase>::CLinuxRendererPLBase()
++{
++  m_plConfig = std::make_unique<PL::RenderConfig>();
++}
++
++template<typename TBase>
++CLinuxRendererPLBase<TBase>::~CLinuxRendererPLBase()
++{
++  for (int i = 0; i < NUM_BUFFERS; ++i)
++  {
++    ReleasePLBuffer(i);
++    ReleaseSWBuffer(i);
++  }
++  if (m_plQueue)
++  {
++    pl_queue_destroy(&m_plQueue);
++    m_plQueue = nullptr;
++  }
++  if (m_cachedFboTex)
++  {
++    pl_tex_destroy(PL::PLInstance::Get()->m_plGpu, &m_cachedFboTex);
++    m_cachedFboTex = nullptr;
++  }
++  m_plConfig.reset();
++  PL::PLInstance::Get()->Reset();
++}
++
++// ---------------------------------------------------------------------------
++// Configure / Flush / AddVideoPicture
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::Configure(const VideoPicture& picture,
++                                            float fps,
++                                            unsigned int orientation)
++{
++  if (!TBase::Configure(picture, fps, orientation))
++    return false;
++
++  m_format = picture.videoBuffer->GetFormat();
++
++  m_colorSpace = pl_color_space{};
++  m_colorSpace.primaries = pl_primaries_from_av(picture.color_primaries);
++  m_colorSpace.transfer = pl_transfer_from_av(picture.color_transfer);
++  m_chromaLocation = pl_chroma_from_av(picture.chroma_position);
++
++  m_eglDisplay = eglGetCurrentDisplay();
++  if (m_eglDisplay == EGL_NO_DISPLAY)
++    m_eglDisplay = GetDRMPRIMEEGLDisplay();
++
++  // Probe EGL DMA-buf modifier support unconditionally: applies to both VAAPI
++  // and DRMPRIME.  When present, eglCreateImageKHR implicitly attaches the
++  // DMA-buf reservation fence to the EGLImage so the GPU waits automatically —
++  // no explicit CPU stall or explicit sync is needed.
++  m_hasEGLModifiers = (eglGetProcAddress("eglQueryDmaBufModifiersEXT") != nullptr);
++
++#if defined(HAVE_LIBVA)
++  m_isVAAPI = (dynamic_cast<VAAPI::CVaapiRenderPicture*>(picture.videoBuffer) != nullptr);
++  if (m_isVAAPI)
++  {
++    m_eglCreateImageKHR =
++        reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
++    m_eglDestroyImageKHR =
++        reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));
++    m_glEGLImageTargetTexture2DOES = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
++        eglGetProcAddress("glEGLImageTargetTexture2DOES"));
++  }
++#endif
++
++  m_isDRMPRIME = (dynamic_cast<CVideoBufferDRMPRIME*>(picture.videoBuffer) != nullptr);
++  if (m_isDRMPRIME)
++  {
++    const EGLDisplay eglDpy = GetDRMPRIMEEGLDisplay();
++    for (auto& dt : m_drmTextures)
++      dt.Init(eglDpy);
++  }
++
++  if (!m_plQueue)
++  {
++    m_plQueue = pl_queue_create(PL::PLInstance::Get()->m_plGpu);
++    if (!m_plQueue)
++      CLog::Log(LOGERROR, "CLinuxRendererPLBase::Configure - pl_queue_create failed");
++  }
++  m_queuePtsOffsetSet = false;
++
++  // Invalidate CMS state: source primaries may have changed and we are about
++  // to render a new video source.
++  m_plConfig->ResetCmsState();
++
++  // Flush libplacebo's renderer caches (peak detection, frame mix state) so
++  // the new source starts clean.  Required when switching content.
++  if (const auto inst = PL::PLInstance::Get())
++    pl_renderer_flush_cache(inst->GetRenderer());
++
++  // Invalidate per-session render caches: the FBO or window size may have changed
++  // and Kodi's VAO may have been recreated since the last Configure call.
++  if (m_cachedFboTex)
++  {
++    pl_tex_destroy(PL::PLInstance::Get()->m_plGpu, &m_cachedFboTex);
++    m_cachedFboTex = nullptr;
++  }
++  m_cachedFboId = UINT_MAX;
++  m_cachedFboW = 0;
++  m_cachedFboH = 0;
++  m_kodiVaoCached = false;
++  m_glStateCached = false;
++
++  // Detect GL_KHR_no_error: if the context was created with no-error mode,
++  // glGetError() is a no-op and we can skip the pre-render drain entirely.
++  {
++    GLint ctxFlags = 0;
++    glGetIntegerv(GL_CONTEXT_FLAGS, &ctxFlags);
++    m_glNoError = (ctxFlags & GL_CONTEXT_FLAG_NO_ERROR_BIT_KHR) != 0;
++  }
++
++  // Probe EGL_ANDROID_native_fence_sync + KHR_wait_sync
++  // Used by both VAAPI (replaces vaSyncSurface() CPU stall) and DRMPRIME
++  // (adds explicit GPU-side sync for V4L2/VC4 decode fences on RPi5 etc.).
++  // Only meaningful when DMA_BUF_IOCTL_EXPORT_SYNC_FILE is also available
++  // at compile time (kernel ≥ 5.2 headers).
++  {
++    auto* createSync = eglGetProcAddress("eglCreateSyncKHR");
++    auto* destroySync = eglGetProcAddress("eglDestroySyncKHR");
++    auto* waitSync = eglGetProcAddress("eglWaitSyncKHR");
++    if (createSync && destroySync && waitSync)
++    {
++      m_eglCreateSyncKHR = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(createSync);
++      m_eglDestroySyncKHR = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(destroySync);
++      m_eglWaitSyncKHR = reinterpret_cast<PFNEGLWAITSYNCKHRPROC>(waitSync);
++      m_hasEGLSyncFence = true;
++    }
++    else
++    {
++      m_hasEGLSyncFence = false;
++    }
++  }
++
++  return true;
++}
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::ConfigChanged(const VideoPicture& picture)
++{
++  return picture.videoBuffer->GetFormat() != m_format;
++}
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::Flush(bool saveBuffers)
++{
++  if (m_plQueue)
++  {
++    pl_queue_reset(m_plQueue);
++    m_queuePtsOffsetSet = false;
++  }
++  // The FBO may be recreated after a seek/stop; drop the cached wrapper so
++  // RenderHook re-wraps with the current FBO on the next frame.
++  if (m_cachedFboTex)
++  {
++    pl_tex_destroy(PL::PLInstance::Get()->m_plGpu, &m_cachedFboTex);
++    m_cachedFboTex = nullptr;
++  }
++  m_cachedFboId = UINT_MAX;
++  m_cachedFboW = 0;
++  m_cachedFboH = 0;
++  // VAO is stable across seeks; no need to invalidate m_kodiVaoCached.
++  // Viewport/scissor state is window-level; invalidate conservatively.
++  m_glStateCached = false;
++  return TBase::Flush(saveBuffers);
++}
++
++template<typename TBase>
++void CLinuxRendererPLBase<TBase>::AddVideoPicture(const VideoPicture& picture, int index)
++{
++  TBase::AddVideoPicture(picture, index);
++  m_plBuffers[index].loaded = false;
++
++  if (!m_plQueue || this->m_fps <= 0.0f)
++    return;
++
++  if (!m_queuePtsOffsetSet)
++  {
++    m_queuePtsOffset = picture.pts;
++    m_queuePtsOffsetSet = true;
++  }
++
++  auto* qf = new QueuedFrameState{index, this};
++
++  pl_source_frame src{};
++  src.pts = picture.pts - m_queuePtsOffset;
++  src.duration = 1.0 / static_cast<double>(this->m_fps);
++  if (picture.iFlags & DVP_FLAG_INTERLACED)
++    src.first_field = (picture.iFlags & DVP_FLAG_TOP_FIELD_FIRST) ? PL_FIELD_TOP : PL_FIELD_BOTTOM;
++  src.frame_data = qf;
++  src.map = &CLinuxRendererPLBase<TBase>::MapCallback;
++  src.unmap = &CLinuxRendererPLBase<TBase>::UnmapCallback;
++  src.discard = &CLinuxRendererPLBase<TBase>::DiscardCallback;
++
++  pl_queue_push(m_plQueue, &src);
++}
++
++// ---------------------------------------------------------------------------
++// pl_queue callbacks
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::MapCallback(pl_gpu /*gpu*/,
++                                              pl_tex* /*tex*/,
++                                              const struct pl_source_frame* src,
++                                              struct pl_frame* out)
++{
++  // libplacebo does not zero the pl_frame before calling map(); initialize it
++  // so that crop={0,0,0,0} (full texture), field=PL_FIELD_NONE, etc. are clean.
++  *out = {};
++
++  auto* qf = static_cast<QueuedFrameState*>(src->frame_data);
++  CLinuxRendererPLBase<TBase>* r = qf->renderer;
++  const int idx = qf->bufferIndex;
++
++  if (!r->UploadTexture(idx))
++    return false;
++
++  const PLBuffer& plbuf = r->m_plBuffers[idx];
++  if (!plbuf.loaded)
++    return false;
++
++  out->num_planes = plbuf.num_planes;
++  for (int n = 0; n < plbuf.num_planes; ++n)
++    out->planes[n] = plbuf.planes[n];
++  out->color = plbuf.colorSpace;
++  out->repr = plbuf.colorRepr;
++  pl_frame_set_chroma_location(out, r->m_chromaLocation);
++  out->rotation = PL::RotationFromOrientation(r->m_renderOrientation);
++
++  // pl_queue sets out->field after map() returns based on first_field splitting.
++  out->field = PL_FIELD_NONE;
++
++  // Leave planes[n].flipped as set by UploadTexture (true for EGLImage DMA-buf
++  // imports where DMA-buf row 0 = top of video but GL texcoord t=0 = bottom).
++  // libplacebo's pass_align_planes inverts the sampling rect for flipped planes.
++
++  return true;
++}
++
++template<typename TBase>
++void CLinuxRendererPLBase<TBase>::UnmapCallback(pl_gpu /*gpu*/,
++                                                struct pl_frame* /*frame*/,
++                                                const struct pl_source_frame* src)
++{
++  // Textures remain in m_plBuffers and are freed by DeleteTexture / ReleasePLBuffer.
++  delete static_cast<QueuedFrameState*>(src->frame_data);
++}
++
++template<typename TBase>
++void CLinuxRendererPLBase<TBase>::DiscardCallback(const struct pl_source_frame* src)
++{
++  delete static_cast<QueuedFrameState*>(src->frame_data);
++}
++
++// ---------------------------------------------------------------------------
++// Feature / scaling support
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++CRenderInfo CLinuxRendererPLBase<TBase>::GetRenderInfo()
++{
++  CRenderInfo info = TBase::GetRenderInfo();
++  info.m_deintMethods.push_back(VS_INTERLACEMETHOD_NONE);
++  info.m_deintMethods.push_back(VS_INTERLACEMETHOD_AUTO);
++  info.m_deintMethods.push_back(VS_INTERLACEMETHOD_LIBPLACEBO_BOB);
++  info.m_deintMethods.push_back(VS_INTERLACEMETHOD_LIBPLACEBO_YADIF);
++  info.m_deintMethods.push_back(VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF);
++  return info;
++}
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::Supports(ERENDERFEATURE feature) const
++{
++  switch (feature)
++  {
++    case RENDERFEATURE_ZOOM:
++    case RENDERFEATURE_VERTICAL_SHIFT:
++    case RENDERFEATURE_PIXEL_RATIO:
++    case RENDERFEATURE_STRETCH:
++    case RENDERFEATURE_ROTATION:
++    case RENDERFEATURE_TONEMAP:
++    case RENDERFEATURE_BRIGHTNESS:
++    case RENDERFEATURE_CONTRAST:
++      return true;
++    default:
++      return false;
++  }
++}
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::Supports(ESCALINGMETHOD method) const
++{
++  switch (method)
++  {
++    case VS_SCALINGMETHOD_AUTO:
++    case VS_SCALINGMETHOD_NEAREST:
++    case VS_SCALINGMETHOD_LINEAR:
++    case VS_SCALINGMETHOD_LANCZOS2:
++    case VS_SCALINGMETHOD_LANCZOS3:
++    case VS_SCALINGMETHOD_LANCZOS3_FAST:
++    case VS_SCALINGMETHOD_SPLINE36:
++    case VS_SCALINGMETHOD_SPLINE36_FAST:
++    case VS_SCALINGMETHOD_CUBIC_MITCHELL:
++    case VS_SCALINGMETHOD_CUBIC_CATMULL:
++    case VS_SCALINGMETHOD_CUBIC_B_SPLINE:
++      return true;
++    default:
++      return false;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// UpdateVideoFilter — apply Kodi GUI settings to libplacebo render params
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++void CLinuxRendererPLBase<TBase>::UpdateVideoFilter()
++{
++  TBase::UpdateVideoFilter();
++  m_plConfig->UpdateVideoFilter(this->m_scalingMethod, this->m_videoSettings);
++}
++
++template<typename TBase>
++EShaderFormat CLinuxRendererPLBase<TBase>::GetShaderFormat()
++{
++  return SHADER_NONE;
++}
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::LoadShadersHook()
++{
++  // Prevent TBase from loading its own YUV shaders; we render via RenderHook.
++  // RENDER_GLSL is a file-scope enum value defined in both LinuxRendererGL.h and
++  // LinuxRendererGLES.h, so it is visible here as a non-dependent name.
++  this->m_renderMethod = RENDER_GLSL;
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// Texture lifecycle
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::CreateTexture(int index)
++{
++  auto& buf = this->m_buffers[index];
++  auto& im = buf.image;
++  memset(&im, 0, sizeof(im));
++  im.height = this->m_sourceHeight;
++  im.width = this->m_sourceWidth;
++  im.cshift_x = 1;
++  im.cshift_y = 1;
++
++  // Generate a real dummy texture so ValidateRenderer passes safely.
++  GLuint dummyTex = 0;
++  glGenTextures(1, &dummyTex);
++  buf.fields[0][0].id = dummyTex; // 0 == FIELD_FULL
++  return true;
++}
++
++template<typename TBase>
++void CLinuxRendererPLBase<TBase>::DeleteTexture(int index)
++{
++  ReleasePLBuffer(index);
++  ReleaseSWBuffer(index);
++  GLuint dummyTex = this->m_buffers[index].fields[0][0].id; // 0 == FIELD_FULL
++  if (dummyTex > 0)
++    glDeleteTextures(1, &dummyTex);
++  this->m_buffers[index].fields[0][0].id = 0;
++}
++
++// ---------------------------------------------------------------------------
++// UploadTexture — VAAPI / DRMPRIME / software paths
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::UploadTexture(int index)
++{
++  auto& buf = this->m_buffers[index];
++  if (!buf.videoBuffer)
++    return false;
++
++  PLBuffer& plbuf = m_plBuffers[index];
++  if (plbuf.loaded) [[likely]]
++    return true;
++  ReleasePLBuffer(index);
++
++#if defined(HAVE_LIBVA)
++  if (m_isVAAPI)
++    return UploadVAAPI(index, plbuf);
++#endif
++
++  if (m_isDRMPRIME)
++    return UploadDRMPRIME(index, plbuf);
++
++  return UploadSoftware(index, plbuf);
++}
++
++// ---------------------------------------------------------------------------
++// UploadVAAPI — VAAPI: export surface as DRM PRIME 2 → EGLImage → GL tex → pl_opengl_wrap
++// ---------------------------------------------------------------------------
++
++#if defined(HAVE_LIBVA)
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::UploadVAAPI(int index, PLBuffer& plbuf)
++{
++  auto& buf = this->m_buffers[index];
++
++  auto* vaaPic = dynamic_cast<VAAPI::CVaapiRenderPicture*>(buf.videoBuffer);
++  if (!vaaPic)
++    return false;
++
++  if (!m_eglCreateImageKHR || !m_eglDestroyImageKHR || !m_glEGLImageTargetTexture2DOES)
++  {
++    CLog::Log(LOGERROR, "CLinuxRendererPLBase::UploadVAAPI - EGL interop not available");
++    return false;
++  }
++
++  VASurfaceID surface = vaaPic->procPic.videoSurface;
++  if (surface == VA_INVALID_ID && vaaPic->avFrame)
++    surface = static_cast<VASurfaceID>(reinterpret_cast<uintptr_t>(vaaPic->avFrame->data[3]));
++  if (surface == VA_INVALID_ID)
++  {
++    CLog::Log(LOGERROR, "CLinuxRendererPLBase::UploadVAAPI - no valid VAAPI surface");
++    return false;
++  }
++
++  VADisplay vadsp = vaaPic->vadsp;
++  // Synchronize the VAAPI surface before we import its DMA-bufs.
++  //
++  // Priority order (best → worst):
++  //  1. Implicit fencing (m_hasEGLModifiers): the kernel/EGL stack inserts a
++  //     DMA-buf fence automatically when eglCreateImageKHR is called.  No
++  //     explicit sync needed at all.
++  //  2. EGL_ANDROID_native_fence_sync (m_hasEGLSyncFence): export a sync-file fd
++  //     from the DMA-buf via DMA_BUF_IOCTL_EXPORT_SYNC_FILE, then import it as an
++  //     EGL Sync Object.  eglWaitSyncKHR (called in RenderHook) inserts the
++  //     wait into the GPU command stream — the CPU thread returns immediately.
++  //  3. vaSyncSurface(): CPU-blocking stall.  Used only when neither of the
++  //     above is available.
++  if (!m_hasEGLModifiers)
++  {
++    bool syncHandled = false;
++#if defined(DMA_BUF_IOCTL_EXPORT_SYNC_FILE)
++    if (m_hasEGLSyncFence)
++    {
++      // vaExportSurfaceHandle (called below) gives us the DMA-buf fds.
++      // We need to export the fence AFTER vaExportSurfaceHandle so the
++      // descriptor is populated.  Defer to after the export call by setting
++      // a flag; we'll do the ioctl there.
++      syncHandled = true; // fence will be created after vaExportSurfaceHandle
++    }
++#endif
++    if (!syncHandled)
++      vaSyncSurface(vadsp, surface);
++  }
++
++  VADRMPRIMESurfaceDescriptor desc{};
++  const VAStatus vaStatus =
++      vaExportSurfaceHandle(vadsp, surface, VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
++                            VA_EXPORT_SURFACE_READ_ONLY | VA_EXPORT_SURFACE_SEPARATE_LAYERS, &desc);
++  if (vaStatus != VA_STATUS_SUCCESS)
++  {
++    CLog::Log(LOGERROR, "CLinuxRendererPLBase::UploadVAAPI - vaExportSurfaceHandle failed: {}",
++              vaErrorStr(vaStatus));
++    return false;
++  }
++
++  plbuf.vaapiNumFds = static_cast<int>(
++      std::min(desc.num_objects, static_cast<uint32_t>(std::size(plbuf.vaapiExportedFd))));
++  for (int obj = 0; obj < plbuf.vaapiNumFds; ++obj)
++    plbuf.vaapiExportedFd[obj] = desc.objects[obj].fd;
++
++#if defined(DMA_BUF_IOCTL_EXPORT_SYNC_FILE)
++  // EGL_ANDROID_native_fence_sync path: export a read fence from the first DMA-buf
++  // object and import it as an EGL Sync object. eglWaitSyncKHR (called in
++  // RenderHook) submits the wait to the GPU command stream asynchronously —
++  // the CPU is not stalled here.
++  if (!m_hasEGLModifiers && m_hasEGLSyncFence && plbuf.vaapiNumFds > 0)
++  {
++    dma_buf_export_sync_file syncExport{};
++    syncExport.flags = DMA_BUF_SYNC_READ;
++    syncExport.fd = -1;
++    if (ioctl(plbuf.vaapiExportedFd[0], DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &syncExport) == 0 &&
++        syncExport.fd >= 0)
++    {
++      const EGLint attribs[] = { EGL_SYNC_NATIVE_FENCE_FD_ANDROID, syncExport.fd, EGL_NONE };
++      plbuf.eglSyncFence = m_eglCreateSyncKHR(m_eglDisplay, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
++      
++      // If EGL failed to create the sync object, we must close the fd ourselves
++      if (plbuf.eglSyncFence == EGL_NO_SYNC_KHR)
++      {
++        close(syncExport.fd);
++      }
++    }
++    else
++    {
++      // ioctl not available at runtime (older kernel); fall back to CPU sync.
++      vaSyncSurface(vadsp, surface);
++    }
++  }
++#endif
++
++  const auto plInst = PL::PLInstance::Get();
++  const pl_gpu gpu = plInst->GetGpu();
++  const GLenum vaapiTexTarget = GetVaapiTexTarget();
++  bool success = true;
++  const uint32_t numLayers = std::min(desc.num_layers, 3u);
++  glGenTextures(static_cast<GLsizei>(numLayers), plbuf.vaapiGLTex);
++
++  for (uint32_t i = 0; i < numLayers && success; ++i)
++  {
++    const auto& layer = desc.layers[i];
++    const auto& object = desc.objects[layer.object_index[0]];
++
++    const EGLint planeW =
++        (i == 0) ? static_cast<EGLint>(desc.width) : (static_cast<EGLint>(desc.width) + 1) / 2;
++    const EGLint planeH =
++        (i == 0) ? static_cast<EGLint>(desc.height) : (static_cast<EGLint>(desc.height) + 1) / 2;
++
++    // 6 mandatory attribute pairs + 2 optional modifier pairs + EGL_NONE terminator
++    static constexpr int kEGLAttribsMax = 6 * 2 + 2 * 2 + 1;
++    static_assert(kEGLAttribsMax == 17, "Update kEGLAttribsMax if adding more EGL attributes");
++    EGLint attribs[kEGLAttribsMax];
++    EGLint* a = attribs;
++    *a++ = EGL_LINUX_DRM_FOURCC_EXT;
++    *a++ = static_cast<EGLint>(layer.drm_format);
++    *a++ = EGL_WIDTH;
++    *a++ = planeW;
++    *a++ = EGL_HEIGHT;
++    *a++ = planeH;
++    *a++ = EGL_DMA_BUF_PLANE0_FD_EXT;
++    *a++ = object.fd;
++    *a++ = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
++    *a++ = static_cast<EGLint>(layer.offset[0]);
++    *a++ = EGL_DMA_BUF_PLANE0_PITCH_EXT;
++    *a++ = static_cast<EGLint>(layer.pitch[0]);
++    if (m_hasEGLModifiers && object.drm_format_modifier != DRM_FORMAT_MOD_INVALID)
++    {
++      *a++ = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
++      *a++ = static_cast<EGLint>(object.drm_format_modifier & 0xFFFFFFFFu);
++      *a++ = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
++      *a++ = static_cast<EGLint>(object.drm_format_modifier >> 32);
++    }
++    *a = EGL_NONE;
++
++    EGLImageKHR eglImage =
++        m_eglCreateImageKHR(m_eglDisplay, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attribs);
++    if (!eglImage)
++    {
++      CLog::Log(LOGERROR,
++                "CLinuxRendererPLBase::UploadVAAPI - eglCreateImageKHR failed for plane {} "
++                "(EGL error 0x{:x})",
++                i, static_cast<unsigned>(eglGetError()));
++      success = false;
++      break;
++    }
++    plbuf.vaapiEGLImage[i] = eglImage;
++
++    glBindTexture(vaapiTexTarget, plbuf.vaapiGLTex[i]);
++    glTexParameteri(vaapiTexTarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri(vaapiTexTarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glTexParameteri(vaapiTexTarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(vaapiTexTarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    m_glEGLImageTargetTexture2DOES(vaapiTexTarget, eglImage);
++    // No glBindTexture(0) unbind needed: pl_opengl_wrap (called below) manages
++    // the texture binding itself, and leaving a texture bound is harmless here.
++
++    GLenum glIformat = 0;
++    switch (layer.drm_format)
++    {
++      case DRM_FORMAT_R8:
++        glIformat = GL_R8;
++        break;
++      case DRM_FORMAT_GR88:
++        glIformat = GL_RG8;
++        break;
++      case DRM_FORMAT_R16:
++        glIformat = GL_R16;
++        break;
++      case DRM_FORMAT_GR1616:
++        glIformat = GL_RG16;
++        break;
++      default:
++        CLog::Log(LOGERROR,
++                  "CLinuxRendererPLBase::UploadVAAPI - unsupported DRM fourcc 0x{:x} for plane {}",
++                  layer.drm_format, i);
++        success = false;
++        break;
++    }
++    if (!success)
++      break;
++
++    pl_opengl_wrap_params wp{};
++    wp.texture = plbuf.vaapiGLTex[i];
++    wp.target = vaapiTexTarget; // GL_TEXTURE_2D (desktop) or GL_TEXTURE_EXTERNAL_OES (GLES)
++    wp.iformat = static_cast<int>(glIformat);
++    wp.width = planeW;
++    wp.height = planeH;
++
++    plbuf.tex[i] = pl_opengl_wrap(gpu, &wp);
++    if (!plbuf.tex[i])
++    {
++      CLog::Log(LOGERROR, "CLinuxRendererPLBase::UploadVAAPI - pl_opengl_wrap failed for plane {}",
++                i);
++      success = false;
++    }
++  }
++
++  if (!success)
++  {
++    ReleasePLBuffer(index);
++    return false;
++  }
++
++  plbuf.num_planes = static_cast<int>(numLayers);
++
++  plbuf.planes[0] = {};
++  plbuf.planes[0].texture = plbuf.tex[0];
++  plbuf.planes[0].components = 1;
++  plbuf.planes[0].component_mapping[0] = PL_CHANNEL_Y;
++  plbuf.planes[0].component_mapping[1] = PL_CHANNEL_NONE;
++  plbuf.planes[0].component_mapping[2] = PL_CHANNEL_NONE;
++  plbuf.planes[0].component_mapping[3] = PL_CHANNEL_NONE;
++  plbuf.planes[0].flipped = true;
++
++  if (numLayers > 1)
++  {
++    plbuf.planes[1] = {};
++    plbuf.planes[1].texture = plbuf.tex[1];
++    plbuf.planes[1].components = 2;
++    plbuf.planes[1].component_mapping[0] = PL_CHANNEL_CB;
++    plbuf.planes[1].component_mapping[1] = PL_CHANNEL_CR;
++    plbuf.planes[1].component_mapping[2] = PL_CHANNEL_NONE;
++    plbuf.planes[1].component_mapping[3] = PL_CHANNEL_NONE;
++    plbuf.planes[1].flipped = true;
++  }
++
++  plbuf.colorRepr.sys = pl_system_from_av(buf.m_srcColSpace);
++  if (plbuf.colorRepr.sys == PL_COLOR_SYSTEM_UNKNOWN)
++    plbuf.colorRepr.sys = pl_color_system_guess_ycbcr(this->m_sourceWidth, this->m_sourceHeight);
++  plbuf.colorRepr.levels = buf.m_srcFullRange ? PL_COLOR_LEVELS_FULL : PL_COLOR_LEVELS_LIMITED;
++  plbuf.colorSpace.primaries = pl_primaries_from_av(buf.m_srcPrimaries);
++  plbuf.colorSpace.transfer = pl_transfer_from_av(buf.m_srcColTransfer);
++
++  switch (desc.fourcc)
++  {
++    case VA_FOURCC_P010:
++      plbuf.colorRepr.bits = {16, 10, 6};
++      break;
++    case VA_FOURCC_P016:
++      plbuf.colorRepr.bits = {16, 16, 0};
++      break;
++    default:
++      break;
++  }
++
++  PL::ApplyHdrMetadata(plbuf.colorSpace, plbuf.colorRepr, plbuf.doviMetadata, buf);
++
++  plbuf.iFlags = buf.iFlags;
++  plbuf.loaded = true;
++  buf.loaded = true;
++  return true;
++}
++#endif // HAVE_LIBVA
++
++// ---------------------------------------------------------------------------
++// UploadDRMPRIME — DMA-buf → single combined OES texture → pl_tex
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::UploadDRMPRIME(int index, PLBuffer& plbuf)
++{
++  auto& buf = this->m_buffers[index];
++
++  auto* drmBuf = dynamic_cast<CVideoBufferDRMPRIME*>(buf.videoBuffer);
++  if (!drmBuf)
++    return false;
++
++  m_drmTextures[index].Unmap(); // defensive — no-op if not mapped
++  if (!m_drmTextures[index].Map(drmBuf))
++  {
++    CLog::Log(LOGERROR, "CLinuxRendererPLBase::UploadDRMPRIME - CDRMPRIMETexture::Map failed");
++    return false;
++  }
++
++  const pl_gpu gpu = PL::PLInstance::Get()->m_plGpu;
++  GLuint glTex = m_drmTextures[index].GetTexture();
++  const CSizeInt sz = m_drmTextures[index].GetTextureSize();
++
++  pl_opengl_wrap_params wp{};
++  wp.texture = glTex;
++  wp.target = GL_TEXTURE_EXTERNAL_OES;
++  GLenum drmIformat;
++  if (buf.m_srcBits > 10)
++    drmIformat = GL_RGBA16F; // 12-bit (P012) or 16-bit (P016)
++  else if (buf.m_srcBits > 8)
++    drmIformat = GL_RGB10_A2; // 10-bit (P010)
++  else
++    drmIformat = GL_RGBA8; // 8-bit (NV12)
++  wp.iformat = drmIformat;
++  wp.width = sz.Width();
++  wp.height = sz.Height();
++
++  plbuf.tex[0] = pl_opengl_wrap(gpu, &wp);
++  if (!plbuf.tex[0])
++  {
++    CLog::Log(LOGERROR, "CLinuxRendererPLBase::UploadDRMPRIME - pl_opengl_wrap failed");
++    m_drmTextures[index].Unmap();
++    return false;
++  }
++
++  plbuf.planes[0] = {};
++  plbuf.planes[0].texture = plbuf.tex[0];
++  plbuf.planes[0].components = 3;
++  plbuf.planes[0].component_mapping[0] = PL_CHANNEL_R;
++  plbuf.planes[0].component_mapping[1] = PL_CHANNEL_G;
++  plbuf.planes[0].component_mapping[2] = PL_CHANNEL_B;
++  plbuf.planes[0].component_mapping[3] = PL_CHANNEL_NONE;
++  plbuf.planes[0].flipped = true;
++  plbuf.num_planes = 1;
++
++  // The GPU driver applies the YCbCr→RGB matrix when the OES texture is sampled,
++  // yielding RGB in the source primaries/transfer. Tell libplacebo this is RGB.
++  plbuf.colorRepr.sys = PL_COLOR_SYSTEM_RGB;
++  plbuf.colorRepr.levels = buf.m_srcFullRange ? PL_COLOR_LEVELS_FULL : PL_COLOR_LEVELS_LIMITED;
++  plbuf.colorSpace.primaries = pl_primaries_from_av(buf.m_srcPrimaries);
++  plbuf.colorSpace.transfer = pl_transfer_from_av(buf.m_srcColTransfer);
++
++  PL::ApplyHdrMetadata(plbuf.colorSpace, plbuf.colorRepr, plbuf.doviMetadata, buf);
++
++  plbuf.iFlags = buf.iFlags;
++
++#if defined(DMA_BUF_IOCTL_EXPORT_SYNC_FILE)
++  // GPU-side fence for the V4L2 / DRMPRIME decode path (e.g. bcm2835-codec on
++  // RPi5).  The VC4/V3D pipeline sets a DMA-buf read fence on the output
++  // buffer when decode completes; we export it as a sync-file and import it
++  // as an EGL Sync object.  eglWaitSyncKHR (called in RenderHook) inserts the
++  // wait into the GPU command stream without stalling the CPU.
++  //
++  // Skipped when m_hasEGLModifiers is true: in that case eglCreateImageKHR
++  // (called inside CDRMPRIMETexture::Map above) already attached the DMA-buf
++  // reservation fence implicitly — adding an explicit explicit sync is redundant.
++  if (m_hasEGLSyncFence && !m_hasEGLModifiers)
++  {
++    const AVDRMFrameDescriptor* desc = drmBuf->GetDescriptor();
++    if (desc && desc->nb_objects > 0)
++    {
++      dma_buf_export_sync_file syncExport{};
++      syncExport.flags = DMA_BUF_SYNC_READ;
++      syncExport.fd = -1;
++      if (ioctl(desc->objects[0].fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &syncExport) == 0 &&
++          syncExport.fd >= 0)
++      {
++        EGLint attribs[] = { EGL_SYNC_NATIVE_FENCE_FD_ANDROID, syncExport.fd, EGL_NONE };
++        plbuf.eglSyncFence = m_eglCreateSyncKHR(m_eglDisplay, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
++        
++        if (plbuf.eglSyncFence == EGL_NO_SYNC_KHR)
++        {
++          close(syncExport.fd);
++        }
++      }
++    }
++  }
++#endif
++
++  plbuf.loaded = true;
++  buf.loaded = true;
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// ReleaseSWBuffer — frees the persistent PBOs and GL textures for one slot
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++void CLinuxRendererPLBase<TBase>::ReleaseSWBuffer(int index)
++{
++  SWBuffer& sw = m_swBuffers[index];
++  for (int n = 0; n < static_cast<int>(std::size(sw.tex)); ++n)
++  {
++    if (sw.pbo[n])
++    {
++      glDeleteBuffers(1, &sw.pbo[n]);
++      sw.pbo[n] = 0;
++    }
++    if (sw.tex[n])
++    {
++      glDeleteTextures(1, &sw.tex[n]);
++      sw.tex[n] = 0;
++    }
++    sw.texW[n] = 0;
++    sw.texH[n] = 0;
++    sw.texIformat[n] = 0;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// PlaneDataToGLFormats — map pl_plane_data layout to GL format/type/iformat
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::PlaneDataToGLFormats(
++    const pl_plane_data& pd, GLenum& iformat, GLenum& format, GLenum& type, int& bytesPerPixel)
++{
++  int numComp = 0;
++  for (const int c : pd.component_size)
++    if (c > 0)
++      ++numComp;
++  if (numComp == 0)
++    return false;
++
++  bytesPerPixel = static_cast<int>(pd.pixel_stride);
++  const bool wide = (bytesPerPixel > numComp); // >1 byte per component: 16-bit container
++
++  switch (numComp)
++  {
++    case 1:
++      iformat = wide ? GL_R16 : GL_R8;
++      format = GL_RED;
++      type = wide ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
++      return true;
++    case 2:
++      iformat = wide ? GL_RG16 : GL_RG8;
++      format = GL_RG;
++      type = wide ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
++      return true;
++    case 4:
++      iformat = wide ? GL_RGBA16 : GL_RGBA8;
++      format = GL_RGBA;
++      type = wide ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
++      return true;
++    default:
++      return false;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// UploadSoftware — async CPU-to-GPU upload via PBO + pl_opengl_wrap
++//
++// Replaces synchronous pl_upload_plane with a PBO pipeline:
++//   1. Orphan PBO each frame  ->  no CPU/GPU sync stall
++//   2. memcpy frame data into the mapped PBO (CPU-side write)
++//   3. glTexSubImage2D with PBO bound  ->  driver schedules async DMA
++//   4. pl_opengl_wrap wraps the persistent GL texture for libplacebo
++//
++// The GL textures (m_swBuffers) survive ReleasePLBuffer; only the lightweight
++// pl_opengl_wrap descriptor (plbuf.tex[n]) is recreated each frame.
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::UploadSoftware(int index, PLBuffer& plbuf)
++{
++  auto& buf = this->m_buffers[index];
++  SWBuffer& sw = m_swBuffers[index];
++
++  uint8_t* src[3]{};
++  int srcStrides[3]{};
++  buf.videoBuffer->GetPlanes(src);
++  buf.videoBuffer->GetStrides(srcStrides);
++
++  pl_bit_encoding bits{};
++  pl_plane_data pdata[4]{};
++  const AVPixelFormat fmt = m_format;
++  plbuf.num_planes = pl_plane_data_from_pixfmt(pdata, &bits, fmt);
++  if (plbuf.num_planes <= 0)
++  {
++    CLog::Log(LOGERROR,
++              "CLinuxRendererPLBase::UploadSoftware - unsupported pixel format {} (buf reports {})",
++              static_cast<int>(fmt), static_cast<int>(buf.videoBuffer->GetFormat()));
++    return false;
++  }
++
++  // Derive chroma plane dimensions. Do NOT use AV_CEIL_RSHIFT(a, b) with a
++  // runtime b -- the macro is implementation-defined for signed integers when b
++  // is not a compile-time constant. Use the explicit ceiling-shift formula.
++  const AVPixFmtDescriptor* fmtDesc = av_pix_fmt_desc_get(fmt);
++  const int chromaShiftW = fmtDesc ? static_cast<int>(fmtDesc->log2_chroma_w) : 1;
++  const int chromaShiftH = fmtDesc ? static_cast<int>(fmtDesc->log2_chroma_h) : 1;
++
++  pl_gpu gpu = PL::PLInstance::Get()->m_plGpu;
++
++  for (int n = 0; n < plbuf.num_planes; ++n)
++  {
++    const int planeW = (n > 0) ? (this->m_sourceWidth + (1 << chromaShiftW) - 1) >> chromaShiftW
++                               : this->m_sourceWidth;
++    const int planeH = (n > 0) ? (this->m_sourceHeight + (1 << chromaShiftH) - 1) >> chromaShiftH
++                               : this->m_sourceHeight;
++
++    GLenum iformat, glFormat, glType;
++    int bytesPerPixel;
++    if (!PlaneDataToGLFormats(pdata[n], iformat, glFormat, glType, bytesPerPixel))
++    {
++      CLog::Log(LOGERROR,
++                "CLinuxRendererPLBase::UploadSoftware - no GL format mapping for plane {}", n);
++      return false;
++    }
++
++    // Reallocate the GL texture only when dimensions or format change.
++    if (sw.tex[n] == 0 || sw.texW[n] != planeW || sw.texH[n] != planeH ||
++        sw.texIformat[n] != iformat)
++    {
++      // The underlying GL texture is being reallocated; the old pl_tex wrapper
++      // would hold a stale texture ID, so invalidate it now.
++      if (plbuf.tex[n])
++      {
++        pl_tex_destroy(gpu, &plbuf.tex[n]);
++        plbuf.tex[n] = nullptr;
++      }
++
++      if (sw.tex[n] == 0)
++        glGenTextures(1, &sw.tex[n]);
++      glBindTexture(GL_TEXTURE_2D, sw.tex[n]);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++      glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(iformat), planeW, planeH, 0, glFormat,
++                   glType, nullptr);
++      glBindTexture(GL_TEXTURE_2D, 0);
++
++      sw.texW[n] = planeW;
++      sw.texH[n] = planeH;
++      sw.texIformat[n] = iformat;
++    }
++
++    if (sw.pbo[n] == 0)
++      glGenBuffers(1, &sw.pbo[n]);
++
++    const GLsizeiptr pboSize = static_cast<GLsizeiptr>(srcStrides[n]) * planeH;
++    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, sw.pbo[n]);
++
++    // (Re)allocate the PBO storage when size changes. glBufferData with nullptr
++    // orphans any previous allocation without a CPU stall.
++    if (sw.pboSize[n] != pboSize)
++    {
++      glBufferData(GL_PIXEL_UNPACK_BUFFER, pboSize, nullptr, GL_STREAM_DRAW);
++      sw.pboSize[n] = pboSize;
++    }
++
++    // GL_MAP_INVALIDATE_BUFFER_BIT orphans the current content, avoiding pipeline
++    // stalls if the GPU is still reading from the previous upload.
++    void* pboPtr = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, pboSize,
++                                    GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
++    if (!pboPtr)
++    {
++      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
++      CLog::Log(LOGERROR,
++                "CLinuxRendererPLBase::UploadSoftware - glMapBufferRange failed for plane {}", n);
++      return false;
++    }
++
++    std::memcpy(pboPtr, src[n], static_cast<size_t>(srcStrides[n]) * planeH);
++    glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
++
++    // With a PBO bound, glTexSubImage2D reads from the PBO's GPU address space
++    // (nullptr = offset 0 into the PBO) rather than CPU memory. The driver can
++    // schedule this DMA transfer asynchronously.
++    const GLint rowLengthPixels = srcStrides[n] / bytesPerPixel;
++    glPixelStorei(GL_UNPACK_ROW_LENGTH, rowLengthPixels);
++    glBindTexture(GL_TEXTURE_2D, sw.tex[n]);
++    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, planeW, planeH, glFormat, glType, nullptr);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
++    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
++
++    // Wrap the persistent GL texture for libplacebo. pl_opengl_wrap allocates
++    // only a small descriptor struct -- no GL calls. pl_tex_destroy (called in
++    // ReleasePLBuffer) releases the wrapper without deleting the GL texture
++    // because libplacebo honours the "external owner" contract for wrapped textures.
++    if (!plbuf.tex[n])
++    {
++      pl_opengl_wrap_params wp{};
++      wp.texture = sw.tex[n];
++      wp.target = GL_TEXTURE_2D;
++      wp.iformat = static_cast<int>(iformat);
++      wp.width = planeW;
++      wp.height = planeH;
++      plbuf.tex[n] = pl_opengl_wrap(gpu, &wp);
++      if (!plbuf.tex[n])
++      {
++        CLog::Log(LOGERROR,
++                  "CLinuxRendererPLBase::UploadSoftware - pl_opengl_wrap failed for plane {}", n);
++        return false;
++      }
++    }
++
++    // Build the pl_plane descriptor using pl_plane_data's component mapping.
++    plbuf.planes[n] = {};
++    plbuf.planes[n].texture = plbuf.tex[n];
++    for (int c = 0; c < 4; ++c)
++    {
++      if (pdata[n].component_size[c] > 0)
++        plbuf.planes[n].component_mapping[plbuf.planes[n].components++] =
++            static_cast<pl_channel>(pdata[n].component_map[c]);
++    }
++    // OpenGL's coordinate system is bottom-up; top-down memory uploads are inverted.
++    plbuf.planes[n].flipped = true;
++  }
++
++  plbuf.colorSpace.primaries = pl_primaries_from_av(buf.m_srcPrimaries);
++  plbuf.colorSpace.transfer = pl_transfer_from_av(buf.m_srcColTransfer);
++  plbuf.colorRepr.sys = pl_system_from_av(buf.m_srcColSpace);
++  if (plbuf.colorRepr.sys == PL_COLOR_SYSTEM_UNKNOWN)
++    plbuf.colorRepr.sys = pl_color_system_guess_ycbcr(this->m_sourceWidth, this->m_sourceHeight);
++  plbuf.colorRepr.levels = buf.m_srcFullRange ? PL_COLOR_LEVELS_FULL : PL_COLOR_LEVELS_LIMITED;
++  plbuf.colorRepr.bits = bits;
++
++  PL::ApplyHdrMetadata(plbuf.colorSpace, plbuf.colorRepr, plbuf.doviMetadata, buf);
++  plbuf.iFlags = buf.iFlags;
++  plbuf.loaded = true;
++  buf.loaded = true;
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// Main render hook
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++bool CLinuxRendererPLBase<TBase>::RenderHook(int idx)
++{
++  PLBuffer& plbuf = m_plBuffers[idx];
++  if (!plbuf.loaded) [[unlikely]]
++    return false;
++
++  const auto plInst = PL::PLInstance::Get();
++  pl_gpu gpu = plInst->GetGpu();
++  pl_renderer renderer = plInst->GetRenderer();
++
++  // Build input frame (used as fallback if the queue path doesn't fire)
++  pl_frame frameIn{};
++  frameIn.num_planes = plbuf.num_planes;
++  for (int n = 0; n < plbuf.num_planes; ++n)
++    frameIn.planes[n] = plbuf.planes[n];
++  frameIn.color = plbuf.colorSpace;
++  frameIn.repr = plbuf.colorRepr;
++  pl_frame_set_chroma_location(&frameIn, m_chromaLocation);
++
++  frameIn.rotation = PL::RotationFromOrientation(this->m_renderOrientation);
++  frameIn.field = PL_FIELD_NONE;
++
++  CRect src, dst, view;
++  this->GetVideoRect(src, dst, view);
++  int viewW = static_cast<int>(view.Width());
++  int viewH = static_cast<int>(view.Height());
++  if (viewW <= 0 || viewH <= 0)
++    return false;
++
++  GLint currentFbo = 0;
++  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFbo);
++  const auto fboId = static_cast<unsigned int>(currentFbo);
++
++  // Re-wrap the framebuffer only when it changes.  pl_opengl_wrap/pl_tex_destroy
++  // on every frame is expensive: some drivers flush pending GPU work at this point
++  // and libplacebo discards cached per-target state, forcing a full re-initialization
++  // on the next pl_render_image[_mix] call.
++  if (!m_cachedFboTex || fboId != m_cachedFboId || viewW != m_cachedFboW || viewH != m_cachedFboH)
++  {
++    if (m_cachedFboTex)
++      pl_tex_destroy(gpu, &m_cachedFboTex);
++
++    // Query the actual internal format of the framebuffer color attachment so
++    // libplacebo knows the real output precision. On HDR-capable compositors
++    // (e.g. KDE Wayland with HDR) the surface may be GL_RGB10_A2 or wider;
++    // lying to libplacebo with GL_RGBA8 would cause it to dither/clamp
++    // unnecessarily before the compositor receives the frame.
++    GLenum attachment = (fboId == 0) ? GL_BACK : GL_COLOR_ATTACHMENT0;
++    GLint redBits = 8;
++    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, attachment,
++                                          GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE, &redBits);
++    GLenum fboIformat;
++    if (redBits > 10)
++      fboIformat = GL_RGBA16F;
++    else if (redBits > 8)
++      fboIformat = GL_RGB10_A2;
++    else
++      fboIformat = GL_RGBA8;
++
++    pl_opengl_wrap_params wrapParams{};
++    wrapParams.framebuffer = fboId;
++    wrapParams.width = viewW;
++    wrapParams.height = viewH;
++    wrapParams.iformat = fboIformat;
++
++    m_cachedFboTex = pl_opengl_wrap(gpu, &wrapParams);
++    if (!m_cachedFboTex)
++    {
++      CLog::Log(LOGERROR, "CLinuxRendererPLBase::RenderHook - failed to wrap GL framebuffer");
++      m_cachedFboId = UINT_MAX;
++      return false;
++    }
++    m_cachedFboId = fboId;
++    m_cachedFboW = viewW;
++    m_cachedFboH = viewH;
++    // FBO change implies the window/surface changed; invalidate cached GL state.
++    m_glStateCached = false;
++  }
++  pl_tex outTex = m_cachedFboTex;
++
++  pl_frame frameOut{};
++  frameOut.num_planes = 1;
++  frameOut.planes[0].texture = outTex;
++  frameOut.planes[0].components = 3;
++  frameOut.planes[0].component_mapping[0] = PL_CHANNEL_R;
++  frameOut.planes[0].component_mapping[1] = PL_CHANNEL_G;
++  frameOut.planes[0].component_mapping[2] = PL_CHANNEL_B;
++  frameOut.planes[0].component_mapping[3] = PL_CHANNEL_NONE;
++  frameOut.crop = {dst.x1, dst.y1, dst.x2, dst.y2};
++
++  if (this->m_passthroughHDR)
++  {
++    const auto& buf = this->m_buffers[idx];
++    frameOut.color.primaries = PL_COLOR_PRIM_BT_2020;
++    frameOut.color.transfer =
++        (buf.m_srcColTransfer == AVCOL_TRC_ARIB_STD_B67) ? PL_COLOR_TRC_HLG : PL_COLOR_TRC_PQ;
++  }
++  else
++  {
++    frameOut.color.primaries = PL_COLOR_PRIM_BT_709;
++    frameOut.color.transfer = PL_COLOR_TRC_BT_1886;
++  }
++  frameOut.repr.sys = PL_COLOR_SYSTEM_RGB;
++  frameOut.repr.levels = CServiceBroker::GetWinSystem()->UseLimitedColor() ? PL_COLOR_LEVELS_LIMITED
++                                                                           : PL_COLOR_LEVELS_FULL;
++
++  // SDR display peak luminance — only set for SDR output (BT.1886 / non-passthrough).
++  // In passthrough HDR mode the output transfer is PQ/HLG and libplacebo is writing
++  // the full HDR signal; setting max_luma to the SDR peak (200-400 cd/m²) would
++  // incorrectly cause libplacebo to tone-map 1000-nit HDR into that narrow window,
++  // compressing saturated out-of-gamut colours (blues, reds, yellows) against the
++  // ceiling and making them look blown out.  For passthrough, leave max_luma = 0 so
++  // libplacebo uses the content's own metadata for any intra-format scaling.
++  if (!this->m_passthroughHDR)
++  {
++    const float peakLuminance = CServiceBroker::GetWinSystem()->GetGuiSdrPeakLuminance();
++    if (peakLuminance > 0.0f)
++      frameOut.color.hdr.max_luma = peakLuminance;
++  }
++
++  // CMS (ICC profile / 3D LUT) is SDR colour management.  Do not apply it when
++  // the output frame is in HDR passthrough mode (PQ/HLG transfer) — libplacebo
++  // would apply SDR colour management on top of an HDR signal, producing wrong
++  // colours (e.g. blown-out cyan sky when an SDR ICC profile is active).
++  if (!this->m_passthroughHDR)
++    m_plConfig->ApplyCMS(frameOut, this->m_srcPrimaries);
++
++  pl_render_params params = m_plConfig->GetOptions()->params;
++  params.border = PL_CLEAR_SKIP;
++
++  // Drain any pre-existing GL errors so libplacebo's gl_check_err doesn't abort
++  // a pass early.  Skipped when the context was created with GL_KHR_no_error
++  // (EGL_CONTEXT_OPENGL_NO_ERROR_KHR) since no errors can ever be generated.
++  if (!m_glNoError)
++  {
++    while (glGetError() != GL_NO_ERROR)
++      ;
++  }
++
++  // Save GL state that libplacebo modifies but may not restore on error paths.
++  // Viewport, scissor enable, and scissor box are CPU-side shadow state in every
++  // known GL/GLES driver (no GPU round-trip), but caching them still removes
++  // 3 function calls from the hot path.  The cache is invalidated whenever the
++  // FBO dimensions change (window resize) or on Configure/Flush.
++  if (!m_glStateCached)
++  {
++    glGetIntegerv(GL_VIEWPORT, m_cachedGLViewport);
++    m_cachedScissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
++    glGetIntegerv(GL_SCISSOR_BOX, m_cachedGLScissor);
++    m_glStateCached = true;
++  }
++  const GLint* savedViewport = m_cachedGLViewport;
++  const GLboolean scissorWasEnabled = m_cachedScissorEnabled;
++  const GLint* savedScissor = m_cachedGLScissor;
++  // libplacebo binds its own VAO per-pass and resets to VAO 0 at exit.
++  // In GL/GLES core profile VAO 0 is invalid; restore Kodi's VAO.
++  // Cache the result: glGetIntegerv(GL_VERTEX_ARRAY_BINDING) serializes the GPU
++  // command stream on tile-based GPUs (Mali/Adreno/PowerVR) because the driver
++  // must flush in-flight work before reading the register.  Kodi's VAO is created
++  // once at startup and never changes, so we query it only on the first render.
++  if (!m_kodiVaoCached)
++  {
++    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &m_kodiVAO);
++    m_kodiVaoCached = true;
++  }
++  const GLint savedVAO = m_kodiVAO;
++
++  // GPU-side DMA-buf fence wait (EGL_ANDROID_native_fence_sync).
++  // UploadTexture() may have imported a DMA-buf sync-file fence for VAAPI or
++  // DRMPRIME frames.  Drain all pending sync objects here — after pl_queue_update
++  // has completed its MapCallback chain, before any pl_render_image[_mix]
++  // command touches the textures.  eglWaitSyncKHR inserts the wait into the
++  // GPU command stream; the CPU thread returns immediately.
++  if (m_hasEGLSyncFence)
++  {
++    for (auto& fbuf : m_plBuffers)
++    {
++      if (fbuf.eglSyncFence != EGL_NO_SYNC_KHR)
++      {
++        m_eglWaitSyncKHR(m_eglDisplay, fbuf.eglSyncFence, 0);
++        m_eglDestroySyncKHR(m_eglDisplay, fbuf.eglSyncFence);
++        fbuf.eglSyncFence = EGL_NO_SYNC_KHR;
++      }
++    }
++  }
++
++  // Queue-based render path (provides prev/curr/next frames for BWDIF/YADIF)
++  bool rendered = false;
++  if (m_plQueue && m_queuePtsOffsetSet)
++  {
++    const auto& buf = this->m_buffers[idx];
++    const float vsyncDuration = 1.0f / CServiceBroker::GetWinSystem()->GetGfxContext().GetFPS();
++
++    pl_queue_params qparams{};
++    qparams.pts = buf.pts - m_queuePtsOffset;
++    qparams.radius = pl_frame_mix_radius(&params);
++    qparams.vsync_duration = vsyncDuration;
++    qparams.timeout = 0;
++
++    pl_frame_mix mix{};
++    const auto status = pl_queue_update(m_plQueue, &mix, &qparams);
++    if (status == PL_QUEUE_OK || status == PL_QUEUE_MORE) [[likely]]
++    {
++      if (!pl_render_image_mix(renderer, &mix, &frameOut, &params))
++        CLog::Log(LOGWARNING, "CLinuxRendererPLBase::RenderHook - pl_render_image_mix failed");
++      rendered = true;
++    }
++    else if (status == PL_QUEUE_ERR) [[unlikely]]
++    {
++      CLog::Log(LOGWARNING, "CLinuxRendererPLBase::RenderHook - pl_queue_update error");
++    }
++  }
++  if (!rendered)
++  {
++    if (!pl_render_image(renderer, &frameIn, &frameOut, &params))
++      CLog::Log(LOGWARNING, "CLinuxRendererPLBase::RenderHook - pl_render_image failed");
++  }
++
++  // Restore framebuffer: gl_tex_blit resets both bindings to 0 after every blit.
++  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, currentFbo);
++  glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++
++  glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
++  if (scissorWasEnabled)
++    glEnable(GL_SCISSOR_TEST);
++  else
++    glDisable(GL_SCISSOR_TEST);
++  glScissor(savedScissor[0], savedScissor[1], savedScissor[2], savedScissor[3]);
++
++  glBindVertexArray(savedVAO);
++
++  // Reset active texture unit (libplacebo may leave it at a non-zero index).
++  glActiveTexture(GL_TEXTURE0);
++
++  // Reset shader program: Kodi's CGLShader may skip glUseProgram if it thinks
++  // its program is still bound; if libplacebo's program is active instead the
++  // GUI renders with the wrong shader.
++  glUseProgram(0);
++
++  // outTex aliases m_cachedFboTex — do NOT destroy it here.  It lives across
++  // frames and is released in Flush(), Configure(), and the destructor.
++
++  // Always return true: we own this slot; the base must not fall through to
++  // its own render path which would crash on uninitialized GL planes.
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// ReleasePLBuffer
++// ---------------------------------------------------------------------------
++
++template<typename TBase>
++void CLinuxRendererPLBase<TBase>::ReleasePLBuffer(int index)
++{
++  PLBuffer& plbuf = m_plBuffers[index];
++
++#if defined(HAVE_LIBVA)
++  if (m_isVAAPI)
++  {
++    // Drop any pending EGL sync object. eglDestroySyncKHR deletes the object
++    // immediately; if a wait is pending, the driver keeps the underlying fence
++    // alive until the wait completes.
++    if (plbuf.eglSyncFence != EGL_NO_SYNC_KHR && m_eglDestroySyncKHR)
++    {
++      m_eglDestroySyncKHR(m_eglDisplay, plbuf.eglSyncFence);
++      plbuf.eglSyncFence = EGL_NO_SYNC_KHR;
++    }
++
++    pl_gpu gpu = PL::PLInstance::Get()->m_plGpu;
++    for (int n = 0; n < static_cast<int>(std::size(plbuf.vaapiGLTex)); ++n)
++    {
++      if (plbuf.tex[n])
++      {
++        pl_tex_destroy(gpu, &plbuf.tex[n]);
++        plbuf.tex[n] = nullptr;
++      }
++      if (plbuf.vaapiGLTex[n])
++      {
++        glDeleteTextures(1, &plbuf.vaapiGLTex[n]);
++        plbuf.vaapiGLTex[n] = 0;
++      }
++      if (plbuf.vaapiEGLImage[n] != EGL_NO_IMAGE_KHR)
++      {
++        m_eglDestroyImageKHR(m_eglDisplay, plbuf.vaapiEGLImage[n]);
++        plbuf.vaapiEGLImage[n] = EGL_NO_IMAGE_KHR;
++      }
++      plbuf.planes[n] = {};
++    }
++    for (int f = 0; f < plbuf.vaapiNumFds; ++f)
++    {
++      if (plbuf.vaapiExportedFd[f] >= 0)
++      {
++        close(plbuf.vaapiExportedFd[f]);
++        plbuf.vaapiExportedFd[f] = -1;
++      }
++    }
++    plbuf.vaapiNumFds = 0;
++    plbuf.num_planes = 0;
++    plbuf.loaded = false;
++    return;
++  }
++#endif
++
++  if (!plbuf.loaded)
++    return;
++
++  // Drop any pending EGL sync object (DRMPRIME path).
++  if (plbuf.eglSyncFence != EGL_NO_SYNC_KHR && m_eglDestroySyncKHR)
++  {
++    m_eglDestroySyncKHR(m_eglDisplay, plbuf.eglSyncFence);
++    plbuf.eglSyncFence = EGL_NO_SYNC_KHR;
++  }
++
++  m_drmTextures[index].Unmap();
++
++  pl_gpu gpu = PL::PLInstance::Get()->m_plGpu;
++  for (int n = 0; n < plbuf.num_planes; ++n)
++  {
++    if (plbuf.tex[n])
++    {
++      pl_tex_destroy(gpu, &plbuf.tex[n]);
++      plbuf.tex[n] = nullptr;
++    }
++    plbuf.planes[n] = {};
++  }
++  plbuf.num_planes = 0;
++  plbuf.loaded = false;
++}
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.cpp
+new file mode 100644
+index 0000000..8213e9f
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.cpp
+@@ -0,0 +1,75 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#include "LinuxRendererPLGL.h"
++
++#include "PLHelper.h"
++#include "cores/VideoPlayer/Buffers/VideoBufferDRMPRIME.h"
++#include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
++#include "utils/log.h"
++
++#if defined(HAVE_LIBVA)
++#include "cores/VideoPlayer/DVDCodecs/Video/VAAPI.h"
++#endif
++
++#include <libplacebo/utils/libav.h>
++
++#include <EGL/egl.h>
++
++// ---------------------------------------------------------------------------
++// Static factory
++// ---------------------------------------------------------------------------
++
++CBaseRenderer* CLinuxRendererPLGL::Create(CVideoBuffer* buffer)
++{
++  if (!buffer)
++    return nullptr;
++
++  pl_bit_encoding bits{};
++  pl_plane_data pdata[4]{};
++  bool isSW = (pl_plane_data_from_pixfmt(pdata, &bits, buffer->GetFormat()) > 0);
++  bool isDRMPRIME = (dynamic_cast<CVideoBufferDRMPRIME*>(buffer) != nullptr);
++#if defined(HAVE_LIBVA)
++  bool isVAAPI = (dynamic_cast<VAAPI::CVaapiRenderPicture*>(buffer) != nullptr);
++#else
++  constexpr bool isVAAPI = false;
++#endif
++
++  if (!isSW && !isVAAPI && !isDRMPRIME)
++  {
++    CLog::Log(LOGDEBUG,
++              "CLinuxRendererPLGL::Create - unsupported buffer type (format {}), skipping",
++              static_cast<int>(buffer->GetFormat()));
++    return nullptr;
++  }
++
++  auto* inst = PL::PLInstance::Get().get();
++  if (!inst->Init())
++  {
++    CLog::Log(LOGERROR, "CLinuxRendererPLGL::Create - PLInstance::Init() failed");
++    return nullptr;
++  }
++
++  return new CLinuxRendererPLGL();
++}
++
++bool CLinuxRendererPLGL::Register()
++{
++  VIDEOPLAYER::CRendererFactory::RegisterRenderer("libplacebo", CLinuxRendererPLGL::Create);
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// Platform-specific hooks
++// ---------------------------------------------------------------------------
++
++EGLDisplay CLinuxRendererPLGL::GetDRMPRIMEEGLDisplay() const
++{
++  // Desktop GL: the current EGL display is always valid for DRMPRIME init.
++  return eglGetCurrentDisplay();
++}
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.h b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.h
+new file mode 100644
+index 0000000..fd0890c
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.h
+@@ -0,0 +1,42 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#pragma once
++
++// LinuxRendererGL.h must precede LinuxRendererPLBase.h so that renderer-specific
++// types (CPictureBuffer, RenderMethod, EShaderFormat, etc.) are already declared
++// when the template body is parsed.
++#include "cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h"
++#include "LinuxRendererPLBase.h"
++
++/**
++ * @brief Linux libplacebo renderer using an OpenGL GPU context.
++ *
++ * Subclasses CLinuxRendererGL via the CLinuxRendererPLBase<> CRTP mixin and intercepts
++ * the render hook to pass frames to libplacebo instead of Kodi's YUV shader pipeline.
++ *
++ * Rendering Paths:
++ * - VAAPI: Hardware-decoded frames are imported zero-copy via vaExportSurfaceHandle
++ * (DRM PRIME 2 → per-plane DMA-buf fds → EGLImage → GL_TEXTURE_2D → pl_opengl_wrap).
++ * GL_TEXTURE_2D is used to avoid the samplerExternalOES restriction in desktop GL 4.6.
++ *
++ * - DRMPRIME: Hardware frames use CDRMPRIMETexture (DMA-buf → EGLImage → GL_TEXTURE_EXTERNAL_OES).
++ *
++ * - Software: CPU-decoded frames are uploaded via an asynchronous PBO pipeline 
++ * (glMapBufferRange → glTexSubImage2D → pl_opengl_wrap).
++ */
++class CLinuxRendererPLGL : public CLinuxRendererPLBase<CLinuxRendererGL>
++{
++public:
++  static CBaseRenderer* Create(CVideoBuffer* buffer);
++  static bool Register();
++
++protected:
++  GLenum GetVaapiTexTarget() const override { return GL_TEXTURE_2D; }
++  EGLDisplay GetDRMPRIMEEGLDisplay() const override;
++};
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.cpp
+new file mode 100644
+index 0000000..3abbc8e
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.cpp
+@@ -0,0 +1,81 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#include "LinuxRendererPLGLES.h"
++
++#include "PLHelper.h"
++#include "cores/VideoPlayer/Buffers/VideoBufferDRMPRIME.h"
++#include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
++#include "utils/log.h"
++#include "windowing/linux/WinSystemEGL.h"
++
++#if defined(HAVE_LIBVA)
++#include "cores/VideoPlayer/DVDCodecs/Video/VAAPI.h"
++#endif
++
++#include <libplacebo/utils/libav.h>
++
++#include <EGL/egl.h>
++
++// ---------------------------------------------------------------------------
++// Static factory
++// ---------------------------------------------------------------------------
++
++CBaseRenderer* CLinuxRendererPLGLES::Create(CVideoBuffer* buffer)
++{
++  if (!buffer)
++    return nullptr;
++
++  bool isDRMPRIME = (dynamic_cast<CVideoBufferDRMPRIME*>(buffer) != nullptr);
++#if defined(HAVE_LIBVA)
++  bool isVAAPI = (dynamic_cast<VAAPI::CVaapiRenderPicture*>(buffer) != nullptr);
++#else
++  constexpr bool isVAAPI = false;
++#endif
++  pl_bit_encoding bits{};
++  pl_plane_data pdata[4]{};
++  bool isSW = (pl_plane_data_from_pixfmt(pdata, &bits, buffer->GetFormat()) > 0);
++
++  if (!isDRMPRIME && !isVAAPI && !isSW)
++  {
++    CLog::Log(
++        LOGDEBUG,
++        "CLinuxRendererPLGLES::Create - buffer format {} not supported by libplacebo, skipping",
++        static_cast<int>(buffer->GetFormat()));
++    return nullptr;
++  }
++
++  auto* inst = PL::PLInstance::Get().get();
++  if (!inst->Init())
++  {
++    CLog::Log(LOGERROR, "CLinuxRendererPLGLES::Create - PLInstance::Init() failed");
++    return nullptr;
++  }
++
++  return new CLinuxRendererPLGLES();
++}
++
++bool CLinuxRendererPLGLES::Register()
++{
++  VIDEOPLAYER::CRendererFactory::RegisterRenderer("libplacebo", CLinuxRendererPLGLES::Create);
++  return true;
++}
++
++// ---------------------------------------------------------------------------
++// Platform-specific hooks
++// ---------------------------------------------------------------------------
++
++EGLDisplay CLinuxRendererPLGLES::GetDRMPRIMEEGLDisplay() const
++{
++  // On GLES/EGL platforms, retrieve the display via the windowing system rather
++  // than eglGetCurrentDisplay() to ensure the correct display is used on
++  // multi-display setups (e.g. GBM/RPi where eglGetCurrentDisplay may differ).
++  auto* winEGL =
++      dynamic_cast<KODI::WINDOWING::LINUX::CWinSystemEGL*>(CServiceBroker::GetWinSystem());
++  return winEGL ? winEGL->GetEGLDisplay() : EGL_NO_DISPLAY;
++}
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.h b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.h
+new file mode 100644
+index 0000000..0b8dbc4
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.h
+@@ -0,0 +1,41 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#pragma once
++
++// LinuxRendererGLES.h must precede LinuxRendererPLBase.h so that renderer-specific
++// types (CPictureBuffer, RenderMethod, EShaderFormat, etc.) are already declared
++// when the template body is parsed.
++#include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
++#include "LinuxRendererPLBase.h"
++
++/**
++ * @brief Linux libplacebo renderer using an OpenGL ES GPU context.
++ *
++ * Subclasses CLinuxRendererGLES via the CLinuxRendererPLBase<> CRTP mixin and intercepts
++ * the render hook to pass frames to libplacebo instead of Kodi's YUV shader pipeline.
++ *
++ * Rendering Paths:
++ * - VAAPI: Hardware-decoded frames are imported zero-copy via vaExportSurfaceHandle
++ * (DRM PRIME 2 → per-plane DMA-buf fds → EGLImage → GL_TEXTURE_EXTERNAL_OES → pl_opengl_wrap).
++ *
++ * - DRMPRIME: Hardware frames use CDRMPRIMETexture (DMA-buf → EGLImage → GL_TEXTURE_EXTERNAL_OES).
++ *
++ * - Software: CPU-decoded frames are uploaded via an asynchronous PBO pipeline 
++ * (glMapBufferRange → glTexSubImage2D → pl_opengl_wrap).
++ */
++class CLinuxRendererPLGLES : public CLinuxRendererPLBase<CLinuxRendererGLES>
++{
++public:
++  static CBaseRenderer* Create(CVideoBuffer* buffer);
++  static bool Register();
++
++protected:
++  GLenum GetVaapiTexTarget() const override { return GL_TEXTURE_EXTERNAL_OES; }
++  EGLDisplay GetDRMPRIMEEGLDisplay() const override;
++};
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/PLHelper.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/PLHelper.cpp
+new file mode 100644
+index 0000000..bf98c8e
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/PLHelper.cpp
+@@ -0,0 +1,349 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#include "PLHelper.h"
++
++#include "ServiceBroker.h"
++#include "filesystem/File.h"
++#include "settings/Settings.h"
++#include "settings/SettingsComponent.h"
++#include "utils/log.h"
++
++#if defined(HAS_GL) || defined(HAS_GLES)
++#include <EGL/egl.h>
++
++#include <memory>
++#endif
++
++static void pl_log_cb(void*, enum pl_log_level level, const char* msg)
++{
++  switch (level)
++  {
++    case PL_LOG_FATAL:
++      CLog::Log(LOGFATAL, "libPlacebo Fatal: {}", msg);
++      break;
++    case PL_LOG_ERR:
++      CLog::Log(LOGERROR, "libPlacebo Error: {}", msg);
++      break;
++    case PL_LOG_WARN:
++      CLog::Log(LOGWARNING, "libPlacebo Warning: {}", msg);
++      break;
++    case PL_LOG_INFO:
++      CLog::Log(LOGINFO, "libPlacebo Info: {}", msg);
++      break;
++    case PL_LOG_DEBUG:
++      CLog::Log(LOGDEBUG, "libPlacebo Debug: {}", msg);
++      break;
++    case PL_LOG_NONE:
++    case PL_LOG_TRACE:
++      CLog::Log(LOGNONE, "libPlacebo Trace: {}", msg);
++      break;
++  }
++}
++
++std::shared_ptr<PL::PLInstance> PL::PLInstance::Get()
++{
++  static std::shared_ptr<PLInstance> sPLResources = std::make_shared<PLInstance>();
++  return sPLResources;
++}
++
++PL::PLInstance::PLInstance()
++  : m_plLog(nullptr),
++#if defined(HAS_GL) || defined(HAS_GLES)
++    m_plGl(nullptr),
++#endif
++    m_plGpu(nullptr),
++    m_plRenderer(nullptr)
++{
++}
++
++PL::PLInstance::~PLInstance() = default;
++
++bool PL::PLInstance::Init()
++{
++  if (m_isInitialized)
++    return true;
++
++  pl_log_params log_param{};
++  log_param.log_cb = pl_log_cb;
++  log_param.log_level = PL_LOG_DEBUG;
++  m_plLog = pl_log_create(PL_API_VER, &log_param);
++#if defined(HAS_GL) || defined(HAS_GLES)
++  pl_opengl_params gl_params = pl_opengl_default_params;
++  gl_params.egl_display = eglGetCurrentDisplay();
++  gl_params.egl_context = eglGetCurrentContext();
++  m_plGl = pl_opengl_create(m_plLog, &gl_params);
++  if (!m_plGl)
++  {
++    CLog::Log(LOGERROR, "PLInstance::Init - failed to create libplacebo OpenGL context");
++    return false;
++  }
++  m_plGpu = m_plGl->gpu;
++#else
++  CLog::Log(LOGERROR, "PLInstance::Init - no libplacebo backend enabled");
++  return false;
++#endif
++
++  m_plRenderer = pl_renderer_create(m_plLog, m_plGpu);
++  m_isInitialized = true;
++  return true;
++}
++void PL::PLInstance::Reset()
++{
++  if (m_isInitialized)
++  {
++    pl_renderer_destroy(&m_plRenderer);
++#if defined(HAS_GL) || defined(HAS_GLES)
++    if (m_plGl)
++      pl_opengl_destroy(&m_plGl);
++#endif
++    pl_log_destroy(&m_plLog);
++    m_isInitialized = false;
++  }
++}
++
++const char* PL::KodiScalingToPlacebo(ESCALINGMETHOD method)
++{
++  switch (method)
++  {
++    case VS_SCALINGMETHOD_NEAREST:
++      return "nearest";
++    case VS_SCALINGMETHOD_LINEAR:
++      return "bilinear";
++    case VS_SCALINGMETHOD_CUBIC_B_SPLINE:
++      return "bicubic";
++    case VS_SCALINGMETHOD_CUBIC_MITCHELL:
++      return "mitchell";
++    case VS_SCALINGMETHOD_CUBIC_CATMULL:
++      return "catmull_rom";
++    case VS_SCALINGMETHOD_LANCZOS2:
++    case VS_SCALINGMETHOD_LANCZOS3_FAST:
++    case VS_SCALINGMETHOD_LANCZOS3:
++      return "lanczos";
++    case VS_SCALINGMETHOD_SPLINE36_FAST:
++    case VS_SCALINGMETHOD_SPLINE36:
++      return "spline36";
++    default:
++      return nullptr;
++  }
++}
++
++PL::RenderConfig::RenderConfig()
++{
++  m_plOpts = pl_options_alloc(PL::PLInstance::Get()->m_plLog);
++  m_plCmsManager = std::make_unique<CColorManager>();
++}
++
++PL::RenderConfig::~RenderConfig()
++{
++  pl_icc_close(&m_iccObject);
++  pl_options_free(&m_plOpts);
++}
++
++void PL::RenderConfig::ResetCmsState()
++{
++  m_plCmsToken = -1;
++  m_cmsLutValid = false;
++  pl_icc_close(&m_iccObject);
++  m_iccPath.clear();
++  m_iccData.clear();
++  m_iccSignature = 0;
++}
++
++void PL::RenderConfig::UpdateVideoFilter(ESCALINGMETHOD scalingMethod,
++                                         const CVideoSettings& videoSettings) const
++{
++  pl_options_reset(m_plOpts, nullptr);
++
++  const auto settings = CServiceBroker::GetSettingsComponent()->GetSettings();
++
++  {
++    static constexpr const char* kPresets[] = {"fast", "default", "high_quality"};
++    const int preset = settings->GetInt(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_PRESET);
++    if (preset >= 0 && preset < static_cast<int>(std::size(kPresets)))
++      pl_options_set_str(m_plOpts, "preset", kPresets[preset]);
++  }
++
++  pl_options_set_str(m_plOpts, "deband",
++                     settings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND) ? "yes"
++                                                                                         : "no");
++  pl_options_set_str(
++      m_plOpts, "peak_detect",
++      settings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_PEAKDETECT) ? "yes" : "no");
++  if (settings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_FRAMEMIX))
++    pl_options_set_str(m_plOpts, "frame_mixer", "oversample");
++
++  if (const char* filter = PL::KodiScalingToPlacebo(scalingMethod))
++  {
++    pl_options_set_str(m_plOpts, "upscaler", filter);
++    pl_options_set_str(m_plOpts, "downscaler", filter);
++  }
++
++  static constexpr const char* kToneMaps[] = {nullptr, "reinhard", "spline", "hable"};
++  if (videoSettings.m_ToneMapMethod > 0 && videoSettings.m_ToneMapMethod < VS_TONEMAPMETHOD_MAX)
++    pl_options_set_str(m_plOpts, "tone_mapping", kToneMaps[videoSettings.m_ToneMapMethod]);
++
++  pl_options_set_str(m_plOpts, "dither",
++                     settings->GetBool(CSettings::SETTING_VIDEOSCREEN_DITHER) ? "yes" : "no");
++
++  switch (videoSettings.m_InterlaceMethod)
++  {
++    case VS_INTERLACEMETHOD_NONE:
++      pl_options_set_str(m_plOpts, "deinterlace", "no");
++      break;
++    case VS_INTERLACEMETHOD_LIBPLACEBO_BOB:
++      pl_options_set_str(m_plOpts, "deinterlace", "yes");
++      pl_options_set_str(m_plOpts, "deinterlace_algo", "bob");
++      break;
++    case VS_INTERLACEMETHOD_LIBPLACEBO_YADIF:
++      pl_options_set_str(m_plOpts, "deinterlace", "yes");
++      pl_options_set_str(m_plOpts, "deinterlace_algo", "yadif");
++      break;
++    case VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF:
++      pl_options_set_str(m_plOpts, "deinterlace", "yes");
++      pl_options_set_str(m_plOpts, "deinterlace_algo", "bwdif");
++      break;
++    default:
++      break;
++  }
++
++  {
++    const float brightness = (videoSettings.m_Brightness - 50.0f) / 50.0f;
++    const float contrast = videoSettings.m_Contrast / 50.0f;
++    if (brightness != 0.0f || contrast != 1.0f)
++    {
++      // Initialise to neutral first so saturation/gamma/hue/temperature stay
++      // at their identity values and only the user-controlled fields are changed.
++      m_plOpts->color_adjustment = pl_color_adjustment_neutral;
++      m_plOpts->color_adjustment.brightness = brightness;
++      m_plOpts->color_adjustment.contrast = contrast;
++      m_plOpts->params.color_adjustment = &m_plOpts->color_adjustment;
++    }
++  }
++}
++
++void PL::RenderConfig::UpdateCmsLut(AVColorPrimaries srcPrimaries)
++{
++  if (!m_plCmsManager->IsEnabled() || !m_plCmsManager->IsValid())
++  {
++    m_cmsLutValid = false;
++    return;
++  }
++
++  if (m_plCmsManager->CheckConfiguration(m_plCmsToken, srcPrimaries))
++    return;
++
++  int clutSize = 0;
++  int dataSize = 0;
++  if (!CColorManager::Get3dLutSize(CMS_DATA_FMT_RGB, &clutSize, &dataSize))
++  {
++    CLog::Log(LOGERROR, "PL::RenderConfig::UpdateCmsLut - Get3dLutSize failed");
++    m_cmsLutValid = false;
++    return;
++  }
++
++  std::vector<uint16_t> rawData(dataSize / sizeof(uint16_t));
++  if (!m_plCmsManager->GetVideo3dLut(srcPrimaries, &m_plCmsToken, CMS_DATA_FMT_RGB, clutSize,
++                                     rawData.data()))
++  {
++    CLog::Log(LOGERROR, "PL::RenderConfig::UpdateCmsLut - GetVideo3dLut failed");
++    m_cmsLutValid = false;
++    return;
++  }
++
++  m_cmsLutData.resize(rawData.size());
++  constexpr float kScale = 1.0f / 65535.0f;
++  for (size_t i = 0; i < rawData.size(); ++i)
++    m_cmsLutData[i] = static_cast<float>(rawData[i]) * kScale;
++
++  m_cmsLut = pl_custom_lut{};
++  m_cmsLut.size[0] = clutSize;
++  m_cmsLut.size[1] = clutSize;
++  m_cmsLut.size[2] = clutSize;
++  m_cmsLut.data = m_cmsLutData.data();
++  m_cmsLut.signature = static_cast<uint64_t>(static_cast<unsigned int>(m_plCmsToken));
++
++  m_cmsLutValid = true;
++  CLog::Log(LOGDEBUG, "PL::RenderConfig::UpdateCmsLut - loaded {}³ CMS LUT (token {})", clutSize,
++            m_plCmsToken);
++}
++
++void PL::RenderConfig::UpdateIccProfile()
++{
++  const auto settings = CServiceBroker::GetSettingsComponent()->GetSettings();
++  const std::string path = settings->GetString(CSettings::SETTING_VIDEOSCREEN_DISPLAYPROFILE);
++
++  if (path == m_iccPath)
++    return;
++
++  m_iccData.clear();
++  m_iccPath.clear();
++  m_iccSignature = 0;
++
++  if (path.empty())
++    return;
++
++  XFILE::CFile f;
++  if (!f.Open(path))
++  {
++    CLog::Log(LOGERROR, "PL::RenderConfig::UpdateIccProfile - cannot open ICC file: {}", path);
++    return;
++  }
++
++  const int64_t size = f.GetLength();
++  if (size <= 0)
++  {
++    CLog::Log(LOGERROR, "PL::RenderConfig::UpdateIccProfile - empty ICC file: {}", path);
++    f.Close();
++    return;
++  }
++
++  m_iccData.resize(static_cast<size_t>(size));
++  f.Read(m_iccData.data(), size);
++  f.Close();
++
++  pl_icc_profile iccProf{};
++  iccProf.data = m_iccData.data();
++  iccProf.len = m_iccData.size();
++  pl_icc_profile_compute_signature(&iccProf);
++  m_iccSignature = iccProf.signature;
++
++  if (!pl_icc_update(PL::PLInstance::Get()->m_plLog, &m_iccObject, &iccProf, nullptr))
++  {
++    CLog::Log(LOGERROR, "PL::RenderConfig::UpdateIccProfile - pl_icc_update failed: {}", path);
++    m_iccData.clear();
++    m_iccSignature = 0;
++    return;
++  }
++
++  m_iccPath = path;
++  CLog::Log(LOGDEBUG, "PL::RenderConfig::UpdateIccProfile - opened ICC profile ({} bytes): {}",
++            size, path);
++}
++
++void PL::RenderConfig::ApplyCMS(pl_frame& frameOut, AVColorPrimaries srcPrimaries)
++{
++  const auto cmsSettings = CServiceBroker::GetSettingsComponent()->GetSettings();
++  const bool cmsEnabled = cmsSettings->GetBool("videoscreen.cmsenabled");
++  const int cmsMode = cmsSettings->GetInt("videoscreen.cmsmode");
++  if (cmsEnabled && cmsMode == CMS_MODE_PROFILE)
++  {
++    UpdateIccProfile();
++    if (m_iccObject)
++      frameOut.icc = m_iccObject;
++  }
++  else
++  {
++    UpdateCmsLut(srcPrimaries);
++    if (m_cmsLutValid)
++    {
++      frameOut.lut = &m_cmsLut;
++      frameOut.lut_type = PL_LUT_NATIVE;
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/PLHelper.h b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/PLHelper.h
+new file mode 100644
+index 0000000..ac96f6a
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/PLHelper.h
+@@ -0,0 +1,172 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#pragma once
++
++#include "libplacebo/colorspace.h"
++#if defined(HAS_GL) || defined(HAS_GLES)
++#include "libplacebo/opengl.h"
++#endif
++#include "cores/VideoPlayer/VideoRenderers/ColorManager.h"
++#include "cores/VideoPlayer/VideoRenderers/RenderInfo.h"
++#include "libplacebo/log.h"
++#include "libplacebo/renderer.h"
++#include "libplacebo/utils/frame_queue.h"
++#include "libplacebo/utils/upload.h"
++
++#include <libplacebo/options.h>
++#include <libplacebo/shaders/icc.h>
++extern "C"
++{
++#include <libavutil/dovi_meta.h>
++#include <libavutil/pixfmt.h>
++}
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include <libavutil/hdr_dynamic_metadata.h>
++#include <libavutil/mastering_display_metadata.h>
++
++#define MAX_FRAME_PASSES 256
++#define MAX_BLEND_PASSES 8
++#define MAX_BLEND_FRAMES 8
++namespace PL
++{
++
++class PLInstance
++{
++public:
++  static std::shared_ptr<PLInstance> Get();
++  PLInstance();
++
++  virtual ~PLInstance();
++  bool Init();
++  void Reset();
++
++#if defined(HAS_GL) || defined(HAS_GLES)
++  pl_opengl GetOpenGL() { return m_plGl; }
++#endif
++  pl_renderer GetRenderer() { return m_plRenderer; }
++  pl_gpu GetGpu() { return m_plGpu; }
++
++  pl_log m_plLog;
++#if defined(HAS_GL) || defined(HAS_GLES)
++  pl_opengl m_plGl;
++#endif
++  pl_gpu m_plGpu;
++  pl_renderer m_plRenderer;
++
++private:
++  bool m_isInitialized{false};
++};
++
++constexpr pl_rotation RotationFromOrientation(unsigned int deg)
++{
++  switch (deg)
++  {
++    case 90:
++      return PL_ROTATION_270;
++    case 180:
++      return PL_ROTATION_180;
++    case 270:
++      return PL_ROTATION_90;
++    default:
++      return PL_ROTATION_0;
++  }
++}
++
++const char* KodiScalingToPlacebo(ESCALINGMETHOD method);
++
++template<typename TBuffer>
++void ApplyHdrMetadata(pl_color_space& colorSpace,
++                      pl_color_repr& colorRepr,
++                      pl_dovi_metadata& doviMetadata,
++                      const TBuffer& b)
++{
++  if (b.m_srcColTransfer == AVCOL_TRC_SMPTEST2084 || b.m_srcColTransfer == AVCOL_TRC_ARIB_STD_B67)
++  {
++    pl_hdr_metadata& hdr = colorSpace.hdr;
++    hdr = {};
++    if (b.hasDisplayMetadata)
++    {
++      const auto& m = b.displayMetadata;
++      hdr.prim.red.x = av_q2d(m.display_primaries[0][0]);
++      hdr.prim.red.y = av_q2d(m.display_primaries[0][1]);
++      hdr.prim.green.x = av_q2d(m.display_primaries[1][0]);
++      hdr.prim.green.y = av_q2d(m.display_primaries[1][1]);
++      hdr.prim.blue.x = av_q2d(m.display_primaries[2][0]);
++      hdr.prim.blue.y = av_q2d(m.display_primaries[2][1]);
++      hdr.prim.white.x = av_q2d(m.white_point[0]);
++      hdr.prim.white.y = av_q2d(m.white_point[1]);
++      if (m.has_luminance)
++      {
++        hdr.max_luma = av_q2d(m.max_luminance);
++        hdr.min_luma = av_q2d(m.min_luminance);
++      }
++    }
++    if (b.hasLightMetadata)
++    {
++      hdr.max_cll = b.lightMetadata.MaxCLL;
++      hdr.max_fall = b.lightMetadata.MaxFALL;
++    }
++  }
++  if (!pl_hdr_metadata_equal(&b.plColorSpace.hdr, &pl_hdr_metadata_empty) ||
++      b.plColorRepr.dovi != nullptr)
++  {
++    if (b.plColorRepr.dovi != nullptr)
++    {
++      colorSpace = b.plColorSpace;
++      colorRepr = b.plColorRepr;
++      doviMetadata = b.plDoviMetadata;
++      colorRepr.dovi = &doviMetadata;
++    }
++    else
++    {
++      pl_hdr_metadata_merge(&colorSpace.hdr, &b.plColorSpace.hdr);
++    }
++  }
++}
++
++class RenderConfig
++{
++public:
++  RenderConfig();
++  ~RenderConfig();
++
++  // Applies Kodi GUI video settings (brightness, quality, algorithms)
++  void UpdateVideoFilter(ESCALINGMETHOD scalingMethod, const CVideoSettings& videoSettings) const;
++
++  // Reloads CMS LUT / ICC profile based on settings
++  void ApplyCMS(pl_frame& frameOut, AVColorPrimaries srcPrimaries);
++
++  // Flushes state when a new video is played
++  void ResetCmsState();
++
++  pl_options GetOptions() const { return m_plOpts; }
++
++private:
++  void UpdateCmsLut(AVColorPrimaries srcPrimaries);
++  void UpdateIccProfile();
++
++  pl_options m_plOpts{nullptr};
++
++  std::unique_ptr<CColorManager> m_plCmsManager;
++  pl_icc_object m_iccObject{nullptr};
++  std::vector<uint8_t> m_iccData;
++  std::string m_iccPath;
++  uint64_t m_iccSignature{0};
++
++  std::vector<float> m_cmsLutData;
++  pl_custom_lut m_cmsLut{};
++  int m_plCmsToken{-1};
++  bool m_cmsLutValid{false};
++};
++
++} // namespace PL
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/libav_wrapper.c b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/libav_wrapper.c
+new file mode 100644
+index 0000000..bf5637e
+--- /dev/null
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LibPlacebo/libav_wrapper.c
+@@ -0,0 +1,10 @@
++/*
++ *  Copyright (C) 2026 Team Kodi
++ *  This file is part of Kodi - https://kodi.tv
++ *
++ *  SPDX-License-Identifier: GPL-2.0-or-later
++ *  See LICENSES/README.md for more information.
++ */
++
++#define PL_LIBAV_IMPLEMENTATION 1
++#include <libplacebo/utils/libav.h>
+\ No newline at end of file
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.cpp
+index 4db8655..fe15e14 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.cpp
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.cpp
+@@ -311,6 +311,14 @@ void CLinuxRendererGL::AddVideoPicture(const VideoPicture &picture, int index)
+   buf.lightMetadata = picture.lightMetadata;
+   if (picture.hasLightMetadata && picture.lightMetadata.MaxCLL)
+     buf.hasLightMetadata = picture.hasLightMetadata;
++
++  buf.pts = picture.pts;
++  buf.iFlags = picture.iFlags;
++#if defined(HAS_LIBPLACEBO)
++  buf.plColorSpace = picture.plColorSpace;
++  buf.plColorRepr = picture.plColorRepr;
++  buf.plDoviMetadata = picture.plDoviMetadata;
++#endif
+ }
+ 
+ void CLinuxRendererGL::ReleaseBuffer(int idx)
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h
+index 15bc552..bfd3edb 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h
+@@ -23,6 +23,11 @@ extern "C" {
+ #include <libavutil/mastering_display_metadata.h>
+ }
+ 
++#if defined(HAS_LIBPLACEBO)
++#define PL_LIBAV_IMPLEMENTATION 0
++#include <libplacebo/colorspace.h>
++#endif
++
+ class CRenderCapture;
+ class CRenderSystemGL;
+ 
+@@ -94,7 +99,7 @@ protected:
+   virtual bool ValidateRenderTarget();
+   virtual void LoadShaders(int field=FIELD_FULL);
+   void SetTextureFilter(GLenum method);
+-  void UpdateVideoFilter();
++  virtual void UpdateVideoFilter();
+   void CheckVideoParameters(int index);
+   AVColorPrimaries GetSrcPrimaries(AVColorPrimaries srcPrimaries, unsigned int width, unsigned int height);
+ 
+@@ -203,6 +208,15 @@ protected:
+     AVMasteringDisplayMetadata displayMetadata;
+     bool hasLightMetadata = false;
+     AVContentLightMetadata lightMetadata;
++
++    double pts{0.0};
++    unsigned int iFlags{0};
++
++#if defined(HAS_LIBPLACEBO)
++    pl_color_space plColorSpace{};
++    pl_color_repr plColorRepr{};
++    pl_dovi_metadata plDoviMetadata{};
++#endif
+   };
+ 
+   // YV12 decoder textures
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.cpp
+index e9bff8a..f56b5f9 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.cpp
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.cpp
+@@ -183,6 +183,14 @@ void CLinuxRendererGLES::AddVideoPicture(const VideoPicture &picture, int index)
+   {
+     buf.hasLightMetadata = picture.hasLightMetadata;
+   }
++
++  buf.pts = picture.pts;
++  buf.iFlags = picture.iFlags;
++#if defined(HAS_LIBPLACEBO)
++  buf.plColorSpace = picture.plColorSpace;
++  buf.plColorRepr = picture.plColorRepr;
++  buf.plDoviMetadata = picture.plDoviMetadata;
++#endif
+ }
+ 
+ void CLinuxRendererGLES::ReleaseBuffer(int idx)
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h
+index d3d461b..b99fbce 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h
+@@ -99,7 +99,7 @@ protected:
+   virtual void LoadShaders(int field=FIELD_FULL);
+   virtual void ReleaseShaders();
+   void SetTextureFilter(GLenum method);
+-  void UpdateVideoFilter();
++  virtual void UpdateVideoFilter();
+   void CheckVideoParameters(int index);
+   AVColorPrimaries GetSrcPrimaries(AVColorPrimaries srcPrimaries, unsigned int width, unsigned int height);
+ 
+@@ -187,6 +187,15 @@ protected:
+     AVMasteringDisplayMetadata displayMetadata;
+     bool hasLightMetadata{false};
+     AVContentLightMetadata lightMetadata;
++
++    double pts{0.0};
++    unsigned int iFlags{0};
++
++#if defined(HAS_LIBPLACEBO)
++    pl_color_space plColorSpace{};
++    pl_color_repr plColorRepr{};
++    pl_dovi_metadata plDoviMetadata{};
++#endif
+   };
+ 
+   // YV12 decoder textures
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/RenderManager.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/RenderManager.cpp
+index 3a3d113..a03d6b3 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/RenderManager.cpp
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/RenderManager.cpp
+@@ -477,22 +477,37 @@ void CRenderManager::CreateRenderer()
+ {
+   if (!m_pRenderer)
+   {
+-    CVideoBuffer *buffer = nullptr;
++    CVideoBuffer* buffer = nullptr;
+     if (m_pConfigPicture)
+       buffer = m_pConfigPicture->videoBuffer;
+ 
+-    auto renderers = VIDEOPLAYER::CRendererFactory::GetRenderers();
+-    for (auto &id : renderers)
+-    {
+-      if (id == "default")
+-        continue;
++    int renderMethod = CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt(
++        CSettings::SETTING_VIDEOPLAYER_RENDERMETHOD);
+ 
+-      m_pRenderer = VIDEOPLAYER::CRendererFactory::CreateRenderer(id, buffer);
++    if (renderMethod == RENDER_METHOD_LIBPLACEBO)
++    {
++      // Explicit request: try libplacebo only, fall back with warning on failure
++      m_pRenderer = VIDEOPLAYER::CRendererFactory::CreateRenderer("libplacebo", buffer);
+       if (m_pRenderer)
+-      {
+         return;
++      CLog::Log(LOGWARNING,
++                "CRenderManager: libplacebo renderer requested but failed to init, falling back to "
++                "default");
++    }
++    else if (renderMethod == RENDER_METHOD_AUTO)
++    {
++      // Auto: try all non-default renderers in registration order
++      auto renderers = VIDEOPLAYER::CRendererFactory::GetRenderers();
++      for (auto& id : renderers)
++      {
++        if (id == "default")
++          continue;
++        m_pRenderer = VIDEOPLAYER::CRendererFactory::CreateRenderer(id, buffer);
++        if (m_pRenderer)
++          return;
+       }
+     }
++    // Any other method (GLSL, SOFTWARE, etc.) or fallback: use legacy renderer
+     m_pRenderer = VIDEOPLAYER::CRendererFactory::CreateRenderer("default", buffer);
+   }
+ }
+diff --git a/xbmc/cores/VideoSettings.h b/xbmc/cores/VideoSettings.h
+index a7135da..f64cb85 100644
+--- a/xbmc/cores/VideoSettings.h
++++ b/xbmc/cores/VideoSettings.h
+@@ -20,23 +20,26 @@
+ 
+ enum EINTERLACEMETHOD
+ {
+-  VS_INTERLACEMETHOD_NONE=0,
+-  VS_INTERLACEMETHOD_AUTO=1,
+-  VS_INTERLACEMETHOD_RENDER_BLEND=2,
+-  VS_INTERLACEMETHOD_RENDER_WEAVE=4,
+-  VS_INTERLACEMETHOD_RENDER_BOB=6,
+-  VS_INTERLACEMETHOD_DEINTERLACE=7,
+-  VS_INTERLACEMETHOD_VDPAU_BOB=8,
+-  VS_INTERLACEMETHOD_VDPAU_INVERSE_TELECINE=11,
+-  VS_INTERLACEMETHOD_VDPAU_TEMPORAL=12,
+-  VS_INTERLACEMETHOD_VDPAU_TEMPORAL_HALF=13,
+-  VS_INTERLACEMETHOD_VDPAU_TEMPORAL_SPATIAL=14,
+-  VS_INTERLACEMETHOD_VDPAU_TEMPORAL_SPATIAL_HALF=15,
+-  VS_INTERLACEMETHOD_DEINTERLACE_HALF=16,
++  VS_INTERLACEMETHOD_NONE = 0,
++  VS_INTERLACEMETHOD_AUTO = 1,
++  VS_INTERLACEMETHOD_RENDER_BLEND = 2,
++  VS_INTERLACEMETHOD_RENDER_WEAVE = 4,
++  VS_INTERLACEMETHOD_RENDER_BOB = 6,
++  VS_INTERLACEMETHOD_DEINTERLACE = 7,
++  VS_INTERLACEMETHOD_VDPAU_BOB = 8,
++  VS_INTERLACEMETHOD_VDPAU_INVERSE_TELECINE = 11,
++  VS_INTERLACEMETHOD_VDPAU_TEMPORAL = 12,
++  VS_INTERLACEMETHOD_VDPAU_TEMPORAL_HALF = 13,
++  VS_INTERLACEMETHOD_VDPAU_TEMPORAL_SPATIAL = 14,
++  VS_INTERLACEMETHOD_VDPAU_TEMPORAL_SPATIAL_HALF = 15,
++  VS_INTERLACEMETHOD_DEINTERLACE_HALF = 16,
+   VS_INTERLACEMETHOD_VAAPI_BOB = 22,
+   VS_INTERLACEMETHOD_VAAPI_MADI = 23,
+   VS_INTERLACEMETHOD_VAAPI_MACI = 24,
+   VS_INTERLACEMETHOD_DXVA_AUTO = 32,
++  VS_INTERLACEMETHOD_LIBPLACEBO_BOB = 33,
++  VS_INTERLACEMETHOD_LIBPLACEBO_YADIF = 34,
++  VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF = 35,
+   VS_INTERLACEMETHOD_MAX // do not use and keep as last enum value.
+ };
+ 
+@@ -72,12 +75,15 @@ private:
+       {VS_INTERLACEMETHOD_VAAPI_MADI, "vaapi madi"},
+       {VS_INTERLACEMETHOD_VAAPI_MACI, "vaapi maci"},
+       {VS_INTERLACEMETHOD_DXVA_AUTO, "dxva auto"},
++      {VS_INTERLACEMETHOD_LIBPLACEBO_BOB, "libplacebo bob"},
++      {VS_INTERLACEMETHOD_LIBPLACEBO_YADIF, "libplacebo yadif"},
++      {VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF, "libplacebo bwdif"},
+   });
+ };
+ 
+ enum ESCALINGMETHOD
+ {
+-  VS_SCALINGMETHOD_NEAREST=0,
++  VS_SCALINGMETHOD_NEAREST = 0,
+   VS_SCALINGMETHOD_LINEAR,
+   VS_SCALINGMETHOD_CUBIC_B_SPLINE,
+   VS_SCALINGMETHOD_CUBIC_MITCHELL,
+@@ -197,7 +203,7 @@ public:
+   CVideoSettings();
+   ~CVideoSettings() = default;
+ 
+-  bool operator!=(const CVideoSettings &right) const;
++  bool operator!=(const CVideoSettings& right) const;
+ 
+   EINTERLACEMETHOD m_InterlaceMethod;
+   ESCALINGMETHOD m_ScalingMethod;
+@@ -205,7 +211,7 @@ public:
+   float m_CustomZoomAmount; // custom setting zoom amount
+   float m_CustomPixelRatio; // custom setting pixel ratio
+   float m_CustomVerticalShift; // custom setting vertical shift
+-  bool  m_CustomNonLinStretch;
++  bool m_CustomNonLinStretch;
+   int m_AudioStream;
+   float m_VolumeAmplification;
+   int m_SubtitleStream;
+@@ -234,11 +240,11 @@ class CCriticalSection;
+ class CVideoSettingsLocked
+ {
+ public:
+-  CVideoSettingsLocked(CVideoSettings &vs, CCriticalSection &critSection);
++  CVideoSettingsLocked(CVideoSettings& vs, CCriticalSection& critSection);
+   virtual ~CVideoSettingsLocked() = default;
+ 
+-  CVideoSettingsLocked(CVideoSettingsLocked const &) = delete;
+-  void operator=(CVideoSettingsLocked const &x) = delete;
++  CVideoSettingsLocked(CVideoSettingsLocked const&) = delete;
++  void operator=(CVideoSettingsLocked const& x) = delete;
+ 
+   void SetSubtitleStream(int stream);
+   void SetSubtitleVisible(bool visible);
+@@ -259,6 +265,6 @@ public:
+   void SetVolumeAmplification(float amp);
+ 
+ protected:
+-  CVideoSettings &m_videoSettings;
+-  CCriticalSection &m_critSection;
++  CVideoSettings& m_videoSettings;
++  CCriticalSection& m_critSection;
+ };
+diff --git a/xbmc/settings/SettingConditions.cpp b/xbmc/settings/SettingConditions.cpp
+index 45dee9e..0956374 100644
+--- a/xbmc/settings/SettingConditions.cpp
++++ b/xbmc/settings/SettingConditions.cpp
+@@ -384,6 +384,9 @@ void CSettingConditions::Initialize()
+ #ifdef HAVE_LIBVA
+   m_simpleConditions.emplace("have_libva");
+ #endif
++#ifdef HAS_LIBPLACEBO
++  m_simpleConditions.emplace("has_libplacebo");
++#endif
+ #ifdef HAVE_LIBVDPAU
+   m_simpleConditions.emplace("have_libvdpau");
+ #endif
+diff --git a/xbmc/settings/Settings.h b/xbmc/settings/Settings.h
+index 0bb0711..ca7a70a 100644
+--- a/xbmc/settings/Settings.h
++++ b/xbmc/settings/Settings.h
+@@ -138,6 +138,11 @@ public:
+   static constexpr auto SETTING_VIDEOPLAYER_CONVERTDOVI = "videoplayer.convertdovi";
+   static constexpr auto SETTING_VIDEOPLAYER_ALLOWEDHDRFORMATS = "videoplayer.allowedhdrformats";
+   static constexpr auto SETTING_VIDEOPLAYER_DOVIZEROLEVEL5 = "videoplayer.dovizerolevel5";
++  static constexpr auto SETTING_VIDEOPLAYER_LIBPLACEBO_PRESET = "videoplayer.libplacebo.preset";
++  static constexpr auto SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND = "videoplayer.libplacebo.deband";
++  static constexpr auto SETTING_VIDEOPLAYER_LIBPLACEBO_PEAKDETECT =
++      "videoplayer.libplacebo.peakdetect";
++  static constexpr auto SETTING_VIDEOPLAYER_LIBPLACEBO_FRAMEMIX = "videoplayer.libplacebo.framemix";
+   static constexpr auto SETTING_VIDEOPLAYER_QUEUETIMESIZE = "videoplayer.queuetimesize";
+   static constexpr auto SETTING_VIDEOPLAYER_QUEUEDATASIZE = "videoplayer.queuedatasize";
+   static constexpr auto SETTING_MYVIDEOS_SELECTACTION = "myvideos.selectaction";
+diff --git a/xbmc/video/dialogs/GUIDialogVideoSettings.cpp b/xbmc/video/dialogs/GUIDialogVideoSettings.cpp
+index 08a880e..248f43e 100644
+--- a/xbmc/video/dialogs/GUIDialogVideoSettings.cpp
++++ b/xbmc/video/dialogs/GUIDialogVideoSettings.cpp
+@@ -51,6 +51,10 @@
+ #define SETTING_VIDEO_VDPAU_NOISE         "vdpau.noise"
+ #define SETTING_VIDEO_VDPAU_SHARPNESS     "vdpau.sharpness"
+ 
++#define SETTING_VIDEO_LIBPLACEBO_DEBAND "video.libplacebo.deband"
++#define SETTING_VIDEO_LIBPLACEBO_PEAKDETECT "video.libplacebo.peakdetect"
++#define SETTING_VIDEO_LIBPLACEBO_FRAMEMIX "video.libplacebo.framemix"
++
+ #define SETTING_VIDEO_INTERLACEMETHOD     "video.interlacemethod"
+ #define SETTING_VIDEO_SCALINGMETHOD       "video.scalingmethod"
+ 
+@@ -206,6 +210,22 @@ void CGUIDialogVideoSettings::OnSettingChanged(const std::shared_ptr<const CSett
+     vs.m_StereoInvert = std::static_pointer_cast<const CSettingBool>(setting)->GetValue();
+     appPlayer->SetVideoSettings(vs);
+   }
++  else if (settingId == SETTING_VIDEO_LIBPLACEBO_DEBAND ||
++           settingId == SETTING_VIDEO_LIBPLACEBO_PEAKDETECT ||
++           settingId == SETTING_VIDEO_LIBPLACEBO_FRAMEMIX)
++  {
++    const auto globalSettings = CServiceBroker::GetSettingsComponent()->GetSettings();
++    const bool value = std::static_pointer_cast<const CSettingBool>(setting)->GetValue();
++    if (settingId == SETTING_VIDEO_LIBPLACEBO_DEBAND)
++      globalSettings->SetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND, value);
++    else if (settingId == SETTING_VIDEO_LIBPLACEBO_PEAKDETECT)
++      globalSettings->SetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_PEAKDETECT, value);
++    else
++      globalSettings->SetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_FRAMEMIX, value);
++    // Trigger renderer to re-apply the updated global settings immediately.
++    CVideoSettings vs = appPlayer->GetVideoSettings();
++    appPlayer->SetVideoSettings(vs);
++  }
+ }
+ 
+ void CGUIDialogVideoSettings::OnSettingAction(const std::shared_ptr<const CSetting>& setting)
+@@ -351,6 +371,9 @@ void CGUIDialogVideoSettings::InitializeSettings()
+   entries.emplace_back(16328, VS_INTERLACEMETHOD_VAAPI_MADI);
+   entries.emplace_back(16329, VS_INTERLACEMETHOD_VAAPI_MACI);
+   entries.emplace_back(16320, VS_INTERLACEMETHOD_DXVA_AUTO);
++  entries.emplace_back(16337, VS_INTERLACEMETHOD_LIBPLACEBO_BOB);
++  entries.emplace_back(16338, VS_INTERLACEMETHOD_LIBPLACEBO_YADIF);
++  entries.emplace_back(16339, VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF);
+ 
+   /* remove unsupported methods */
+   for (TranslatableIntegerSettingOptions::iterator it = entries.begin(); it != entries.end(); )
+@@ -455,6 +478,24 @@ void CGUIDialogVideoSettings::InitializeSettings()
+               visible);
+   }
+ 
++  // libplacebo render quality — only present in HAS_LIBPLACEBO builds; existence of the
++  // deband setting is the runtime gate (returns nullptr when the setting wasn't registered).
++  {
++    const auto globalSettings = CServiceBroker::GetSettingsComponent()->GetSettings();
++    if (globalSettings->GetSetting(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND))
++    {
++      AddToggle(groupVideo, SETTING_VIDEO_LIBPLACEBO_DEBAND, 13477, SettingLevel::Basic,
++                globalSettings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND), false,
++                true, 13478);
++      AddToggle(groupVideo, SETTING_VIDEO_LIBPLACEBO_PEAKDETECT, 13479, SettingLevel::Basic,
++                globalSettings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_PEAKDETECT),
++                false, true, 13480);
++      AddToggle(groupVideo, SETTING_VIDEO_LIBPLACEBO_FRAMEMIX, 13481, SettingLevel::Basic,
++                globalSettings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_FRAMEMIX), false,
++                true, 13482);
++    }
++  }
++
+   // stereoscopic settings
+   entries.clear();
+   entries.emplace_back(16316, static_cast<int>(RenderStereoMode::OFF));
+diff --git a/xbmc/windowing/X11/WinSystemX11GLContext.cpp b/xbmc/windowing/X11/WinSystemX11GLContext.cpp
+index 74b5191..de58387 100644
+--- a/xbmc/windowing/X11/WinSystemX11GLContext.cpp
++++ b/xbmc/windowing/X11/WinSystemX11GLContext.cpp
+@@ -23,6 +23,9 @@
+ #include "cores/VideoPlayer/VideoReferenceClock.h"
+ #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h"
+ #include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
++#if defined(HAS_LIBPLACEBO)
++#include "cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.h"
++#endif
+ #include "guilib/DispResource.h"
+ #include "rendering/gl/ScreenshotSurfaceGL.h"
+ #include "windowing/GraphicContext.h"
+@@ -286,6 +289,9 @@ bool CWinSystemX11GLContext::RefreshGLContext(bool force)
+   CDVDFactoryCodec::ClearHWAccels();
+   VIDEOPLAYER::CRendererFactory::ClearRenderer();
+   CLinuxRendererGL::Register();
++#if defined(HAS_LIBPLACEBO)
++  CLinuxRendererPLGL::Register();
++#endif
+ 
+   CScreenshotSurfaceGL::Register();
+ 
+diff --git a/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp b/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp
+index 22a0f01..3b48a48 100644
+--- a/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp
++++ b/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp
+@@ -14,6 +14,9 @@
+ #include "cores/RetroPlayer/rendering/VideoRenderers/RPRendererOpenGL.h"
+ #include "cores/VideoPlayer/DVDCodecs/DVDFactoryCodec.h"
+ #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h"
++#if defined(HAS_LIBPLACEBO)
++#include "cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.h"
++#endif
+ #include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
+ #include "rendering/gl/ScreenshotSurfaceGL.h"
+ #include "utils/BufferObjectFactory.h"
+@@ -53,6 +56,9 @@ bool CWinSystemGbmGLContext::InitWindowSystem()
+   VIDEOPLAYER::CRendererFactory::ClearRenderer();
+   CDVDFactoryCodec::ClearHWAccels();
+   CLinuxRendererGL::Register();
++#if defined(HAS_LIBPLACEBO)
++  CLinuxRendererPLGL::Register();
++#endif
+   RETRO::CRPProcessInfoGbm::Register();
+   RETRO::CRPProcessInfoGbm::RegisterRendererFactory(new RETRO::CRendererFactoryDMAOpenGL);
+   RETRO::CRPProcessInfoGbm::RegisterRendererFactory(new RETRO::CRendererFactoryOpenGL);
+diff --git a/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp b/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp
+index 64a6e98..c3b9cfd 100644
+--- a/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp
++++ b/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp
+@@ -18,6 +18,9 @@
+ #include "cores/VideoPlayer/VideoRenderers/HwDecRender/RendererDRMPRIME.h"
+ #include "cores/VideoPlayer/VideoRenderers/HwDecRender/RendererDRMPRIMEGLES.h"
+ #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
++#if defined(HAS_LIBPLACEBO)
++#include "cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.h"
++#endif
+ #include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
+ #include "rendering/gles/ScreenshotSurfaceGLES.h"
+ #include "utils/BufferObjectFactory.h"
+@@ -57,6 +60,9 @@ bool CWinSystemGbmGLESContext::InitWindowSystem()
+   VIDEOPLAYER::CRendererFactory::ClearRenderer();
+   CDVDFactoryCodec::ClearHWAccels();
+   CLinuxRendererGLES::Register();
++#if defined(HAS_LIBPLACEBO)
++  CLinuxRendererPLGLES::Register();
++#endif
+   RETRO::CRPProcessInfoGbm::Register();
+   RETRO::CRPProcessInfoGbm::RegisterRendererFactory(new RETRO::CRendererFactoryDMAOpenGLES);
+   RETRO::CRPProcessInfoGbm::RegisterRendererFactory(new RETRO::CRendererFactoryOpenGLES);
+diff --git a/xbmc/windowing/wayland/WinSystemWaylandEGLContextGL.cpp b/xbmc/windowing/wayland/WinSystemWaylandEGLContextGL.cpp
+index 38d2f7f..e61d4d0 100644
+--- a/xbmc/windowing/wayland/WinSystemWaylandEGLContextGL.cpp
++++ b/xbmc/windowing/wayland/WinSystemWaylandEGLContextGL.cpp
+@@ -13,6 +13,9 @@
+ #include "cores/RetroPlayer/rendering/VideoRenderers/RPRendererDMAOpenGL.h"
+ #include "cores/RetroPlayer/rendering/VideoRenderers/RPRendererOpenGL.h"
+ #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h"
++#if defined(HAS_LIBPLACEBO)
++#include "cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGL.h"
++#endif
+ #include "rendering/gl/ScreenshotSurfaceGL.h"
+ #include "utils/BufferObjectFactory.h"
+ #include "utils/DMAHeapBufferObject.h"
+@@ -42,6 +45,9 @@ bool CWinSystemWaylandEGLContextGL::InitWindowSystem()
+   }
+ 
+   CLinuxRendererGL::Register();
++#if defined(HAS_LIBPLACEBO)
++  CLinuxRendererPLGL::Register();
++#endif
+   RETRO::CRPProcessInfo::RegisterRendererFactory(new RETRO::CRendererFactoryDMAOpenGL);
+   RETRO::CRPProcessInfo::RegisterRendererFactory(new RETRO::CRendererFactoryOpenGL);
+ 
+diff --git a/xbmc/windowing/wayland/WinSystemWaylandEGLContextGLES.cpp b/xbmc/windowing/wayland/WinSystemWaylandEGLContextGLES.cpp
+index e5e4437..114673f 100644
+--- a/xbmc/windowing/wayland/WinSystemWaylandEGLContextGLES.cpp
++++ b/xbmc/windowing/wayland/WinSystemWaylandEGLContextGLES.cpp
+@@ -15,6 +15,9 @@
+ #include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodecDRMPRIME.h"
+ #include "cores/VideoPlayer/VideoRenderers/HwDecRender/RendererDRMPRIMEGLES.h"
+ #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
++#if defined(HAS_LIBPLACEBO)
++#include "cores/VideoPlayer/VideoRenderers/LibPlacebo/LinuxRendererPLGLES.h"
++#endif
+ #include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
+ #include "rendering/gles/ScreenshotSurfaceGLES.h"
+ #include "utils/BufferObjectFactory.h"
+@@ -46,6 +49,9 @@ bool CWinSystemWaylandEGLContextGLES::InitWindowSystem()
+ 
+   CDVDVideoCodecDRMPRIME::Register();
+   CRendererDRMPRIMEGLES::Register();
++#if defined(HAS_LIBPLACEBO)
++  CLinuxRendererPLGLES::Register();
++#endif
+ 
+   RETRO::CRPProcessInfo::RegisterRendererFactory(new RETRO::CRendererFactoryDMAOpenGLES);
+   RETRO::CRPProcessInfo::RegisterRendererFactory(new RETRO::CRendererFactoryOpenGLES);
