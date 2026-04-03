@@ -7,13 +7,14 @@ PKG_SHA256="d05fdf90bea2f629eaa2d115e909fd356388ac639e54f77b87a018a6d76224bd"
 PKG_LICENSE="LGPLv2.1"
 PKG_SITE="https://code.videolan.org/videolan/libplacebo"
 PKG_URL="https://github.com/haasn/libplacebo/archive/refs/tags/v${PKG_VERSION}.tar.gz"
-PKG_DEPENDS_TARGET="toolchain glad:host Jinja2:host libdovi"
+PKG_DEPENDS_TARGET="toolchain glad:host Jinja2:host libdovi lcms2"
 PKG_DEPENDS_UNPACK="vulkan-headers"
 PKG_LONGDESC="Reusable library for GPU-accelerated image/video processing primitives and shaders"
 
 PKG_MESON_OPTS_TARGET="-Dvk-proc-addr=disabled \
                        -Dd3d11=disabled \
                        -Dshaderc=disabled \
+                       -Dlcms=enabled \
                        -Ddovi=enabled \
                        -Dlibdovi=enabled \
                        -Ddemos=false"
